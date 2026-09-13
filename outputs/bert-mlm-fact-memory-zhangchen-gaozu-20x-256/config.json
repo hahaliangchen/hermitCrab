@@ -1,0 +1,15 @@
+{
+  "vocab_size": 2596,
+  "hidden_size": 256,
+  "num_hidden_layers": 4,
+  "num_attention_heads": 4,
+  "intermediate_size": 1024,
+  "max_position_embeddings": 138,
+  "type_vocab_size": 2,
+  "hidden_dropout_prob": 0.1,
+  "attention_probs_dropout_prob": 0.1,
+  "layer_norm_eps": 1e-12,
+  "pad_token_id": 0,
+  "mask_token_id": 4,
+  "initializer_range": 0.02
+}
