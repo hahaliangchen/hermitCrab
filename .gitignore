@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Generated model checkpoints and experiment outputs
+outputs/
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Generated logs and visualizations
+*.log
+*.png
+
+# Local editor and OS files
+.venv/
+venv/
+.idea/
+.vscode/
+Thumbs.db
+*.swp
