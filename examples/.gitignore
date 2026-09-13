@@ -1,0 +1,3 @@
+# Local training corpora are kept out of the public code repository.
+*.txt
+*.jsonl
