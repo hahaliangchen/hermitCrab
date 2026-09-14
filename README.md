@@ -1,37 +1,68 @@
-# BERT Simple (无矩阵研究版 / Matrix-Free Research Edition)
+# BERT Simple（三维关系与动态 Q/K 实验版）
 
-这是一个极简的、剥离了冗余代码的 BERT 实现（约300行），专为**第一性原理 (First Principles)** 理解和架构实验（如 Matrix-Free / 几何 AI）而设计。
+这是一个极简的 BERT 实现，当前用于研究三维关系组合、动态三维 Q/K 和事实记忆保持。Matrix-Free 方向已废弃，不再作为当前架构目标。
 
 ## 核心特性 (为什么它很特别)
 
-### 1. 极简主义 "第一性原理" 代码
+### 1. 极简主义 BERT 代码
 *   **零臃肿**: 所有的核心逻辑 (`BertEmbeddings`, `SelfAttention`, `Encoder`) 都被浓缩在 `bert_simple/model.py` 中。
-*   **可读性强**: 不同于 HuggingFace 那动辄 5000+ 行的工业级代码，这个实现是为了让单个工程师能够完全读懂、理解并进行**重构**而设计的。
+*   **可读性强**: 不同于 HuggingFace 的工业级实现，这个实现保留了 embedding、self-attention、encoder 和 MLM 的完整主链，便于直接改造。
 
-### 2. "透明盒子" 架构 (为 Matrix-Free 做准备)
-*   **可调试性**: 模型经过了特殊补丁，支持 `output_attentions=True`。
-*   **可视化**: 你可以提取出原始的 Attention 矩阵（自注意力分数），精确地观察“谁在看谁”（详见 `visualize_heads.py`）。这对于在转向 Matrix-Free 几何方法之前，验证“硬件饱和/算力浪费”至关重要。
+### 2. 三维动态关系通道
+*   **静态三维组合**: 训练时限制和保护关系更新通道，允许共享参数小幅适应，严重冲突时再隔离。
+*   **动态三维 Q/K**: `examples/bert_mlm_dynamic_word_spaces.py` 先用普通 BERT 第一层生成每个位置的上下文表示，再用可学习 route Q/K 选择候选 space；后续层使用每个 head 独立的动态三维局部分数。
+*   **相对位置注意力**: 新模型不再把绝对位置向量加到 token 上，而是在每个 attention head 的 QK 分数中加入有方向的相对距离 bias；序列整体平移不会改变位置关系。
+*   **可调试性**: 模型支持 `output_attentions=True`，也会记录路由熵、候选数量和 space 使用情况。
+*   **独立语法—词属性过滤器**: `bert_simple/grammar_filter.py` 使用独立 embedding、相对位置注意力、8 维 `g_t` 和 8 维 `h_t`，通过独立 Q/K 预测属性兼容度。过滤器不读取主 BERT hidden，不更新主模型，主模型权重改变也不会改变过滤器输出。旧 checkpoint 的耦合属性 gate 保留兼容，新推理入口绕过它，避免重复降权。
 
 ### 3. 动态 "历史专家" 分词器
-*   **中文优先设计**: `SimpleBertTokenizer` 将汉字视为原子的逻辑单元（不需要复杂的 BPE 分词）。
+*   **中文优先设计**: `SimpleBertTokenizer` 按语料中的空格分词，已分词的中文词保持为一个 token。
 *   **动态词表**: 支持 `train_from_texts` 方法，它可以扫描历史文本（如《史记》），并瞬间构建一个只包含相关字符的自定义词表。彻底解决古文生僻字的 OOV (Out of Vocabulary) 问题。
 
 ## 使用方法
 
 ### 基于自定义文本训练 (例如：史记 / 历史文本)
-训练脚本 `examples/simple_tokenizer_mlm.py` 已增强，支持加载外部文件。
+训练脚本 `examples/bert_mlm_dynamic_word_spaces.py` 使用现有语料实现上下文路由和动态三维 Q/K。
 
 **命令:**
 ```bash
-python examples/simple_tokenizer_mlm.py "D:\project\bert-simple\examples\shiji_baihua.txt" --epochs 1 --hidden-size 256
+python examples/bert_mlm_dynamic_word_spaces.py \
+  examples/shiji_baihua_zhangchen_gaozu_long_context.txt \
+  --epochs 20 --hidden-size 256
 ```
 *   **输入**: 一个文本文件，每行一句话/一段话。
 *   **流程**:
     1.  扫描文件以构建动态词表。
-    2.  从头开始训练一个 BERT 掩码语言模型 (MLM)。
-    3.  将模型保存到 `outputs/simple-tokenizer-mlm`。
+    2.  从头开始训练一个使用相对位置注意力的 BERT 掩码语言模型 (MLM)。
+    3.  训练并保存模型、三维空间注册表和 `word_attribute_registry.json` 到 `outputs/bert-mlm-dynamic-word-spaces-contextual`。
 
-如果不提供文件参数，会默认读取 examples/shiji_baihua.txt；如果指定路径不存在，脚本会直接报错，避免误用模拟数据。训练脚本默认使用 CPU、hidden_size=256，也可以通过命令行参数调整训练轮数、batch size 和最大步数。
+如果不提供文件参数，动态三维 Q/K 脚本会默认读取项目中现有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`。训练从随机初始化开始，不依赖旧权重；默认使用 CPU、hidden_size=256，可以通过命令行参数调整训练轮数和路由空间数量。
+
+### 单独训练语法过滤器（保留已训练主 BERT）
+
+```bash
+python examples/train_independent_grammar.py --epochs 100
+python examples/train_independent_grammar.py --evaluate-only
+python examples/test_independent_grammar.py
+```
+
+默认读取已有主模型的词表，在 `outputs/independent-grammar-filter` 保存独立权重、完整数据划分、训练曲线和 `report.json`。训练使用可枚举的粗结构模板以及前后分句组合，不向主模型灌入模板事实；留出每类最后一种句式与独立主语做开发回归，验证集用于选择 checkpoint（准确率相同时比较验证损失）。报告另列归一化后未见的输入和更复杂的组合句。数据仍属于合成闭集，指标不能等同于掌握全部中文语法。
+
+接入已加载的动态 BERT：
+
+```python
+from bert_simple.grammar_filter import IndependentGrammarFilter, filtered_prediction
+grammar = IndependentGrammarFilter.from_pretrained("outputs/independent-grammar-filter").eval()
+main_model.eval()
+raw_logits, filtered_logits, info = filtered_prediction(
+    main_model, main_tokenizer, grammar, "这位 高祖 叫 [MASK] 。")
+```
+
+两边分别编码同一份空格分词文本，通过词字符串对齐候选词表。过滤全词表后再取 top-k；未知内容词保持中性，低置信度时减弱过滤，合法的功能词/标点槽位也参与训练。当前未标注词的语义属性尚未完成自动归纳，不能把这部分中性放行描述为已经学会人物或地点分类。过滤器只能减少结构不合适的候选，不能自动增强主 BERT 事实记忆。
+
+过滤器输入使用显式的小型结构词表，结构同义形式共享输入符号，词表外内容词归一成通用占位符，避免记住训练主语。该归一化保持 token 数量与位置，不改变主模型的输入或候选词身份。不同原句归一化后可能相同，因此报告包含归一化重复数量。新领域的结构词需要扩展词表；对长句、嵌套及多解结构还需独立验证。
+
+`在 [MASK] 。/？`、`到了 [MASK] 。/？` 使用显式多解允许集合保护合法属性，避免分类头过度自信时误筛“呢/吗/哪”。这是结构规则保护，不等于模型已学会完整的多标签属性分布。其余结构使用学习分数。`--evaluate-only` 重算报告，不重新训练或改写过滤器权重。
 
 ### 可视化 (也就是那个 "显微镜")
 要查看模型内部的“思维过程/注意力”：

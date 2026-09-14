@@ -17,6 +17,10 @@ class BertConfig:
     num_attention_heads: int = 12
     intermediate_size: int = 3072
     max_position_embeddings: int = 512
+    # New models use relative position bias.  ``absolute`` remains available
+    # only so checkpoints written before the switch can still be inspected.
+    position_embedding_type: str = "relative"
+    relative_position_max_distance: int = 128
     type_vocab_size: int = 2
     hidden_dropout_prob: float = 0.1
     attention_probs_dropout_prob: float = 0.1
@@ -33,7 +37,13 @@ class BertConfig:
 
     @classmethod
     def from_dict(cls, d):
-        return cls(**d)
+        values = dict(d)
+        # Configs written by the pre-relative-position implementation did not
+        # have a position type field and contain an absolute-position table.
+        # Infer the legacy mode for those files; newly constructed configs
+        # default to relative positions.
+        values.setdefault("position_embedding_type", "absolute")
+        return cls(**values)
 
     @classmethod
     def from_json_file(cls, path):
@@ -46,7 +56,15 @@ class BertEmbeddings(nn.Module):
     def __init__(self, config: BertConfig):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
-        self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
+        if config.position_embedding_type not in {"relative", "absolute"}:
+            raise ValueError(
+                "position_embedding_type must be 'relative' or 'absolute'"
+            )
+        self.position_embeddings = (
+            nn.Embedding(config.max_position_embeddings, config.hidden_size)
+            if config.position_embedding_type == "absolute"
+            else None
+        )
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -56,14 +74,38 @@ class BertEmbeddings(nn.Module):
         batch_size, seq_length = input_ids.size()
         if token_type_ids is None:
             token_type_ids = torch.zeros_like(input_ids)
-        position_ids = torch.arange(seq_length, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
         inputs_embeds = self.word_embeddings(input_ids)
         token_type_embeds = self.token_type_embeddings(token_type_ids)
-        position_embeds = self.position_embeddings(position_ids)
-        embeddings = inputs_embeds + token_type_embeds + position_embeds
+        embeddings = inputs_embeds + token_type_embeds
+        if self.position_embeddings is not None:
+            position_ids = torch.arange(seq_length, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+            embeddings = embeddings + self.position_embeddings(position_ids)
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
+
+
+def _build_relative_position_bias(
+    relative_position_bias: Optional[nn.Embedding],
+    max_distance: int,
+    seq_length: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Optional[torch.Tensor]:
+    """Return a head-specific ``[1, heads, T, T]`` relative-position bias.
+
+    The table is indexed by the signed key-minus-query distance.  Distances
+    outside the configured range share the nearest boundary bucket, so the
+    representation has no dependence on an absolute sequence offset.
+    """
+    if relative_position_bias is None:
+        return None
+    positions = torch.arange(seq_length, device=device)
+    relative_positions = positions.unsqueeze(0) - positions.unsqueeze(1)
+    relative_positions = relative_positions.clamp(-max_distance, max_distance)
+    bucket_ids = relative_positions + max_distance
+    bias = relative_position_bias(bucket_ids)
+    return bias.permute(2, 0, 1).unsqueeze(0).to(dtype=dtype)
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -77,19 +119,45 @@ class MultiHeadSelfAttention(nn.Module):
         self.qkv = nn.Linear(config.hidden_size, 3 * config.hidden_size)
         self.out_proj = nn.Linear(config.hidden_size, config.hidden_size)
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.relative_position_max_distance = config.relative_position_max_distance
+        self.relative_position_bias = (
+            nn.Embedding(
+                2 * config.relative_position_max_distance + 1,
+                self.num_heads,
+            )
+            if config.position_embedding_type == "relative"
+            else None
+        )
 
     def _transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
         new_shape = x.size()[:-1] + (self.num_heads, self.head_dim)
         x = x.view(*new_shape).permute(0, 2, 1, 3)
         return x
 
-    def forward(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        route_weights: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        # ``route_weights`` is accepted by the common attention interface so
+        # experimental attention implementations can receive per-position
+        # routing explicitly.  The standard BERT attention does not use it.
         qkv = self.qkv(hidden_states)
         query, key, value = qkv.chunk(3, dim=-1)
         query = self._transpose_for_scores(query)
         key = self._transpose_for_scores(key)
         value = self._transpose_for_scores(value)
         attn_scores = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(self.head_dim)
+        relative_bias = _build_relative_position_bias(
+            self.relative_position_bias,
+            self.relative_position_max_distance,
+            hidden_states.size(1),
+            hidden_states.device,
+            attn_scores.dtype,
+        )
+        if relative_bias is not None:
+            attn_scores = attn_scores + relative_bias
         if attention_mask is not None:
             attn_scores = attn_scores + attention_mask
         attn_probs = torch.softmax(attn_scores, dim=-1)
@@ -109,8 +177,18 @@ class BertAttention(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-    def forward(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None, output_attentions: bool = False) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        self_out, attn_probs = self.self_attn(hidden_states, attention_mask)
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+        route_weights: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        self_out, attn_probs = self.self_attn(
+            hidden_states,
+            attention_mask,
+            route_weights=route_weights,
+        )
         hidden_states = self.dropout(self_out) + hidden_states
         hidden_states = self.LayerNorm(hidden_states)
         return hidden_states, attn_probs if output_attentions else None
@@ -147,8 +225,19 @@ class BertLayer(nn.Module):
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
 
-    def forward(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None, output_attentions: bool = False) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        attn_output, attn_probs = self.attention(hidden_states, attention_mask, output_attentions=output_attentions)
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+        route_weights: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        attn_output, attn_probs = self.attention(
+            hidden_states,
+            attention_mask,
+            output_attentions=output_attentions,
+            route_weights=route_weights,
+        )
         inter = self.intermediate(attn_output)
         layer_output = self.output(inter, attn_output)
         return layer_output, attn_probs
@@ -207,6 +296,8 @@ class BertModel(nn.Module):
     def _build_attention_mask(self, input_ids: torch.LongTensor, attention_mask: Optional[torch.Tensor]) -> torch.Tensor:
         if attention_mask is None:
             attention_mask = (input_ids != self.config.pad_token_id).long()
+        else:
+            attention_mask = attention_mask.to(device=input_ids.device)
         extended = (1.0 - attention_mask.float()).unsqueeze(1).unsqueeze(2) * -10000.0
         return extended
 
