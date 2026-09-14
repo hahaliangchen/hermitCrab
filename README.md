@@ -40,7 +40,13 @@ python examples/bert_mlm_dynamic_word_spaces.py \
 
 ### 单独训练语法过滤器（保留已训练主 BERT）
 
+> 完整的数据存放目录、真实语料训练命令与指标规范请参阅：[GRAMMAR_LAYER_TRAINING_GUIDE.md](GRAMMAR_LAYER_TRAINING_GUIDE.md)。
+
 ```bash
+# 基于最新提取的《史记》1.2万条真实语法属性数据集训练：
+python examples/train_independent_grammar.py --dataset data/shiji/manifests/dataset.json --epochs 50
+
+# 基于传统合成规则模板训练：
 python examples/train_independent_grammar.py --epochs 100
 python examples/train_independent_grammar.py --evaluate-only
 python examples/test_independent_grammar.py
