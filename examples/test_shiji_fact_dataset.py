@@ -61,8 +61,50 @@ class ShijiFactDatasetTests(unittest.TestCase):
     def test_naming_is_not_mislabelled_as_causative(self) -> None:
         forbidden_lines = {258, 1190, 6009, 6243}
         self.assertFalse(
-            any(row["source_line"] in forbidden_lines for row in self.rows)
+            any(
+                row["source_line"] in forbidden_lines
+                and row["grammar"] == "CAUSATIVE"
+                for row in self.rows
+            )
         )
+
+    def test_relation_rows_have_explicit_link_metadata(self) -> None:
+        relation_grammars = {"TITLE_LINK", "ALIAS", "KINSHIP"}
+        relation_rows = [
+            row for row in self.rows if row["grammar"] in relation_grammars
+        ]
+        self.assertTrue(relation_rows)
+        for row in relation_rows:
+            self.assertEqual(row["relation"], row["relation_type"])
+            self.assertIn(row["relation_direction"], {
+                "title_to_person", "person_to_title", "alias",
+                "child_to_parent", "parent_to_child",
+                "grandparent_to_grandchild", "grandchild_to_grandparent",
+                "sibling_to_sibling", "spouse_to_spouse",
+                "uncle_to_nephew", "nephew_to_uncle",
+                "ancestor_to_descendant", "descendant_to_ancestor",
+            })
+            self.assertEqual(set(row["linked_entity"]), {"left", "right"})
+            self.assertTrue(row["linked_entity"]["left"])
+            self.assertTrue(row["linked_entity"]["right"])
+
+    def test_identity_kinship_and_spouse_edges_survive_noise_guards(self) -> None:
+        pairs = {
+            (
+                row["grammar"],
+                row["relation_type"],
+                row["linked_entity"]["left"],
+                row["linked_entity"]["right"],
+            )
+            for row in self.rows
+            if row["grammar"] in {"TITLE_LINK", "ALIAS", "KINSHIP"}
+        }
+        self.assertIn(("TITLE_LINK", "TITLE_OF", "高祖", "刘邦"), pairs)
+        self.assertIn(("ALIAS", "ALIAS_OF", "项羽", "项籍"), pairs)
+        self.assertIn(("KINSHIP", "SIBLING_OF", "蒙恬", "蒙毅"), pairs)
+        self.assertIn(("KINSHIP", "SPOUSE_OF", "樊哙", "吕须"), pairs)
+        self.assertNotIn(("TITLE_LINK", "TITLE_OF", "乘机", "王"), pairs)
+        self.assertNotIn(("TITLE_LINK", "TITLE_OF", "王", "三个"), pairs)
 
 
 if __name__ == "__main__":

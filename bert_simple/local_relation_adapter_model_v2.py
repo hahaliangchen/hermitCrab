@@ -20,6 +20,9 @@ from .model import BertConfig
 from .tokenizer import SimpleBertTokenizer
 
 
+DEFAULT_RELATION_SCORE_SCALE = 24.0
+
+
 class ScaledLocalRelationBilinearAdapter(LocalRelationBilinearAdapter):
     """Normalize local candidate keys and expose a useful logit scale."""
 
@@ -28,10 +31,12 @@ class ScaledLocalRelationBilinearAdapter(LocalRelationBilinearAdapter):
         relation_triples: Iterable[Sequence[int]],
         hidden_size: int,
         mask_token_id: int,
-        relation_score_scale: float = 12.0,
+        relation_score_scale: float = DEFAULT_RELATION_SCORE_SCALE,
     ):
         super().__init__(relation_triples, hidden_size, mask_token_id)
         self.relation_score_scale = float(relation_score_scale)
+        if self.relation_score_scale <= 0.0:
+            raise ValueError("relation_score_scale must be positive")
 
     def forward(
         self,
@@ -87,7 +92,7 @@ class ScaledLocalRelationMarginBertForMaskedLM(
         attribute_bias_scale: float = 1.5,
         constrained_frequency_gate: float = 0.25,
         margin_value: float = 2.0,
-        relation_score_scale: float = 12.0,
+        relation_score_scale: float = DEFAULT_RELATION_SCORE_SCALE,
     ):
         super().__init__(
             config,
@@ -174,7 +179,12 @@ class ScaledLocalRelationMarginBertForMaskedLM(
             ),
             margin_value=float(adapter_config.get("margin_value", 2.0)),
             relation_score_scale=float(
-                v2_config.get("relation_score_scale", 12.0)
+                v2_config.get(
+                    "relation_score_scale",
+                    adapter_config.get(
+                        "relation_score_scale", DEFAULT_RELATION_SCORE_SCALE
+                    ),
+                )
             ),
         )
         model.load_state_dict(state_dict, strict=True)

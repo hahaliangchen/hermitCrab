@@ -38,6 +38,28 @@ python examples/bert_mlm_dynamic_word_spaces.py \
 
 如果不提供文件参数，动态三维 Q/K 脚本会默认读取项目中现有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`。训练从随机初始化开始，不依赖旧权重；默认使用 CPU、hidden_size=256，可以通过命令行参数调整训练轮数和路由空间数量。
 
+### 事实记忆分支中的动态 Q/K
+
+当前事实记忆主线保留了 MLM 输出侧的 3×3 relation matrix，同时把上下文路由的动态 Q/K 接入 `route_start_layer` 之后的 self-attention。候选 relation 由样本提供，但具体路由由当前 hidden state 通过 router 动态计算；局部 Q/K 分数在 attention softmax 之前加入。relation matrix、动态 Q/K 矩阵和 router 一起进入 adapter 更新组，训练日志会记录它们的梯度范数与实际更新范数。
+
+```bash
+python examples/train_shiji_fact_memory_dynamic_qk.py
+```
+
+该入口使用统一的 `relation_score_scale=24.0`。原有 `train_shiji_fact_memory_local_relation_margin_v2.py` 仍可作为不含 attention 动态 Q/K 的对照实验，方便比较动态 Q/K 对事实记忆和遗忘的影响。
+
+### 关系增强的《史记》事实记忆数据
+
+事实记忆数据由当前仓库的分词语料 `data/shiji/segmented/shiji_segmented.txt` 构建（当前为 10,631 行），不再只依赖 100 行示例节选。构建命令：
+
+```bash
+python examples/build_shiji_fact_dataset.py
+```
+
+结果写入 `data/shiji/manifests/fact_memory_dataset.json`，并同步到 `outputs/fact-memory/facts_dataset.json`；覆盖报告在 `data/shiji/manifests/fact_memory_report.json`。除原有任命、攻伐、战果和籍贯事实外，关系样本还记录标题—人物、别名、本名/字号、父子、祖孙、兄弟、婚姻和世系关系，并保留 `relation_type`、`relation_direction`、`linked_entity`、`source_line` 等字段，供动态路由和事实回放使用。
+
+报告中的关系覆盖率是“当前分词源文件中出现明确关系模式的行”的覆盖率，不等同于已经完成《史记》全部章节的人工语义标注。提取器采用词典与句式规则，遇到分词粘连且无法安全做单词元遮罩的姓名会保守跳过。
+
 ### 单独训练语法过滤器（保留已训练主 BERT）
 
 > 完整的数据存放目录、真实语料训练命令与指标规范请参阅：[GRAMMAR_LAYER_TRAINING_GUIDE.md](GRAMMAR_LAYER_TRAINING_GUIDE.md)。

@@ -1,205 +1,311 @@
 {
   "schema_version": 2,
-  "total_facts": 355,
+  "total_facts": 929,
   "source_sentences_count": 10631,
-  "source_lines_used": 302,
+  "source_lines_used": 564,
+  "source_line_coverage_ratio": 0.05305239394224438,
+  "relation_fact_count": 523,
+  "relation_source_lines_used": 265,
+  "relation_source_coverage_ratio": 0.024927099990593546,
+  "relation_pair_count": 362,
+  "relation_direction_distribution": {
+    "child_to_parent": 35,
+    "parent_to_child": 39,
+    "person_to_title": 196,
+    "title_to_person": 202,
+    "grandparent_to_grandchild": 6,
+    "grandchild_to_grandparent": 6,
+    "alias": 13,
+    "uncle_to_nephew": 2,
+    "sibling_to_sibling": 17,
+    "nephew_to_uncle": 1,
+    "spouse_to_spouse": 4,
+    "ancestor_to_descendant": 1,
+    "descendant_to_ancestor": 1
+  },
+  "relation_surface_distribution": {
+    "儿子": 43,
+    "父亲": 5,
+    "名叫": 10,
+    "title_name_apposition": 319,
+    "母亲": 5,
+    "自称": 1,
+    "本名": 2,
+    "孙子": 10,
+    "叫": 7,
+    "被任用为": 2,
+    "号称": 4,
+    "叔父": 3,
+    "妹妹": 3,
+    "弟弟": 14,
+    "立为": 8,
+    "长子": 7,
+    "次子": 1,
+    "三子": 1,
+    "四子": 1,
+    "子": 2,
+    "起名叫": 2,
+    "字": 2,
+    "任命为": 24,
+    "拜为": 8,
+    "玄孙": 2,
+    "又称": 2,
+    "称为": 2,
+    "号": 4,
+    "封为": 8,
+    "小儿子": 5,
+    "女儿": 4,
+    "嫁给": 2,
+    "被拜为": 1,
+    "娶": 2,
+    "被立为": 1,
+    "被封为": 2,
+    "祖先": 2,
+    "称": 2
+  },
   "grammar_distribution": {
-    "CAMPAIGN": 97,
-    "CAUSATIVE": 91,
-    "APPOINTMENT": 71,
-    "COMBAT_OUTCOME": 64,
+    "KINSHIP": 112,
+    "TITLE_LINK": 398,
+    "CAMPAIGN": 111,
+    "COMBAT_OUTCOME": 92,
+    "CAUSATIVE": 110,
+    "ALIAS": 13,
     "LOCATION_EVENT": 5,
-    "ORIGIN": 27
+    "APPOINTMENT": 69,
+    "ORIGIN": 19
   },
   "relation_type_distribution": {
-    "PUNISH": 12,
-    "ASSIGN": 91,
-    "APPOINT": 71,
-    "ATTACK": 75,
-    "KILL": 27,
+    "CHILD_OF": 35,
+    "PARENT_OF": 39,
+    "HAS_TITLE": 196,
+    "TITLE_OF": 202,
+    "CONQUER": 18,
+    "PUNISH": 14,
+    "DEFEAT": 56,
+    "ASSIGN": 110,
+    "KILL": 36,
+    "GRANDPARENT_OF": 6,
+    "GRANDCHILD_OF": 6,
+    "ALIAS_OF": 13,
     "EVENT_AT": 5,
-    "DEFEAT": 37,
-    "CONQUER": 10,
-    "BORN_IN": 27
+    "APPOINT": 69,
+    "ATTACK": 79,
+    "UNCLE_OR_AUNT_OF": 2,
+    "SIBLING_OF": 17,
+    "BORN_IN": 19,
+    "NEPHEW_OR_NIECE_OF": 1,
+    "SPOUSE_OF": 4,
+    "ANCESTOR_OF": 1,
+    "DESCENDANT_OF": 1
   },
   "target_role_distribution": {
-    "object": 305,
-    "role": 35,
-    "subject": 15
+    "object": 887,
+    "role": 32,
+    "subject": 10
   },
   "split_distribution": {
-    "train": 291,
-    "test": 27,
-    "dev": 37
+    "test": 108,
+    "train": 735,
+    "dev": 86
   },
   "attribute_distribution": {
-    "('ENTITY', 'PERSON')": 157,
-    "('ENTITY', 'GROUP')": 27,
-    "('ENTITY', 'TITLE')": 40,
-    "('ENTITY', 'PLACE')": 87,
-    "('ENTITY', 'PERSON', 'TITLE')": 44
+    "('ENTITY', 'PERSON')": 515,
+    "('ENTITY', 'PERSON', 'TITLE')": 116,
+    "('ENTITY', 'GROUP')": 35,
+    "('ENTITY', 'TITLE')": 168,
+    "('ENTITY', 'PLACE')": 95
   },
   "variant_distribution": {
-    "0": 155,
-    "1": 200
+    "0": 381,
+    "1": 548
   },
   "distractor_distribution": {
-    "5": 355
+    "5": 929
   },
-  "average_heuristic_confidence": 0.948450704225352,
+  "average_heuristic_confidence": 0.9581700753498386,
   "quality_checks": {
-    "exact_one_base_mask": 355,
+    "exact_one_base_mask": 929,
     "base_answer_leakage": 0,
-    "variant_count": 200,
+    "variant_count": 548,
     "variant_answer_mismatch": 0,
     "variant_answer_leakage": 0
   },
-  "rejected_candidates": {},
+  "rejected_candidates": {
+    "duplicate_fact": 12
+  },
   "notes": [
     "confidence is a rule-based score, not a measured accuracy",
     "naming/alias expressions using 叫 are excluded from CAUSATIVE",
     "all variants carry an independent answer label",
-    "source_line determines the split to prevent context leakage"
+    "source_line determines the split to prevent context leakage",
+    "relation coverage is measured against the current segmented source file, not a claim of complete semantic annotation of every Shiji chapter",
+    "relation extraction is a conservative lexicon-and-pattern candidate set; glued multi-token names may be skipped when a one-token mask would be ambiguous"
   ],
   "sample_preview": [
     {
-      "fact_group_id": "line_292_PUNISH_10",
-      "source_line": 292,
-      "context": "商汤 起兵 为了 拯救 黎民 ， 商汤 决定 起兵 讨伐 夏桀 。",
-      "long_context": "又 花 了 很多 金玉 财宝 ， 贿赂 了 桀 左右 的 亲信 。 于是 ， 桀 把 汤放 了 。 商汤 起兵 为了 拯救 黎民 ， 商汤 决定 起兵 讨伐 夏桀 。 但 要 打败 夏桀 也 不是 一件 容易 的 事 。 夏在商 的 西边 ， 商 的 北边 是 昆吾 ， 东边 是 顾 ， 南边 是 豕韦 ， 这 三个 诸侯国 力量 比较 强 ， 是 夏桀 的 支持者 。",
-      "masked_text": "商汤 起兵 为了 拯救 黎民 ， 商汤 决定 起兵 讨伐 [MASK] 。",
-      "answer": "夏桀",
+      "fact_group_id": "line_5_KINSHIP_12_15",
+      "source_line": 5,
+      "context": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
+      "long_context": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+      "masked_text": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 [MASK] 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
+      "answer": "大禹",
       "target_role": "object",
       "target_span": [
-        10,
-        11
+        12,
+        13
       ],
-      "subject": "商汤",
+      "subject": "启",
       "subject_attributes": [
         "ENTITY",
         "PERSON"
       ],
-      "relation": "PUNISH",
-      "relation_type": "PUNISH",
-      "relation_surface": "讨伐",
-      "relation_evidence": "决定 起兵 讨伐 夏桀 。",
-      "object": "夏桀",
+      "relation": "CHILD_OF",
+      "relation_type": "CHILD_OF",
+      "relation_surface": "儿子",
+      "relation_evidence": "治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在",
+      "object": "大禹",
       "object_attributes": [
         "ENTITY",
         "PERSON"
       ],
-      "grammar": "CAMPAIGN",
+      "grammar": "KINSHIP",
       "answer_attributes": [
         "ENTITY",
         "PERSON"
       ],
-      "confidence": 0.96,
-      "confidence_basis": "source_span_verified+pattern_match",
-      "subject_resolution": "explicit_nearest",
+      "confidence": 0.95,
+      "confidence_basis": "source_span_verified+explicit_relation_pattern",
+      "subject_resolution": "explicit_relation",
       "distractors": [
-        "勾践",
-        "赵王歇",
-        "英布",
-        "霍去病",
-        "周公旦"
+        "周勃",
+        "章邯",
+        "商鞅",
+        "楚庄王",
+        "霍去病"
       ],
       "variants": [],
-      "split": "train",
+      "split": "test",
+      "relation_direction": "child_to_parent",
+      "linked_entity": {
+        "left": "大禹",
+        "right": "启"
+      },
       "fact_id": "shiji_fact_0001"
     },
     {
-      "fact_group_id": "line_412_assign_5",
-      "source_line": 412,
-      "context": "后来 ， 武丁 又 派 百官 多方 寻找 ， 终于 在 傅岩 这个 地方 找到 了 一个 叫 “ 说 ” 的 人 ， 当时 说 正在 那里 筑路 。",
-      "long_context": "第二天 一早 ， 武丁 就 在 各处 寻找 他 梦 中 的 贤人 。 他 按照 梦中人 的 容貌 与 朝 中 的 百官 相对 照 ， 没有 一个 人 符合 ， 弄 得 他 失望 极了 。 后来 ， 武丁 又 派 百官 多方 寻找 ， 终于 在 傅岩 这个 地方 找到 了 一个 叫 “ 说 ” 的 人 ， 当时 说 正在 那里 筑路 。 很快 ， 说 被 带到 了 武丁 面前 。 武丁 一见 ， 果然 是 梦 中 之 人 ， 心中 十分高兴 。",
-      "masked_text": "后来 ， 武丁 又 派 [MASK] 多方 寻找 ， 终于 在 傅岩 这个 地方 找到 了 一个 叫 “ 说 ” 的 人 ， 当时 说 正在 那里 筑路 。",
-      "answer": "百官",
-      "target_role": "object",
-      "target_span": [
-        5,
-        6
-      ],
-      "subject": "武丁",
-      "subject_attributes": [
-        "ENTITY",
-        "PERSON"
-      ],
-      "relation": "ASSIGN",
-      "relation_type": "ASSIGN",
-      "relation_surface": "派",
-      "relation_evidence": "武丁 又 派 百官 多方 寻找 ， 终于 在 傅岩",
-      "object": "百官",
-      "object_attributes": [
-        "ENTITY",
-        "GROUP"
-      ],
-      "grammar": "CAUSATIVE",
-      "answer_attributes": [
-        "ENTITY",
-        "GROUP"
-      ],
-      "confidence": 0.96,
-      "confidence_basis": "source_span_verified+pattern_match",
-      "subject_resolution": "explicit_nearest",
-      "distractors": [
-        "诸侯",
-        "骑士",
-        "燕人",
-        "民众",
-        "军队"
-      ],
-      "variants": [],
-      "split": "train",
-      "fact_id": "shiji_fact_0002"
-    },
-    {
-      "fact_group_id": "line_415_appoint_15_17",
-      "source_line": 415,
-      "context": "再 跟 他 一 交谈 ， 发现 果然 是 一位 贤人 ， 武丁 就 任命 说 为 宰相 。",
-      "long_context": "很快 ， 说 被 带到 了 武丁 面前 。 武丁 一见 ， 果然 是 梦 中 之 人 ， 心中 十分高兴 。 再 跟 他 一 交谈 ， 发现 果然 是 一位 贤人 ， 武丁 就 任命 说 为 宰相 。 武丁 把 傅 赐给 说 为 姓 ， 从此 他 就 叫 傅说 。 有 了 傅 说 的 辅佐 ， 武丁 修明 政治 ， 行德 于民 ， 天下 的 民众 都 十分 欢欣 ， 商朝 终于 再度 中兴 了 。",
-      "masked_text": "再 跟 他 一 交谈 ， 发现 果然 是 一位 贤人 ， 武丁 就 任命 [MASK] 为 宰相 。",
-      "answer": "说",
+      "fact_group_id": "line_5_KINSHIP_12_15",
+      "source_line": 5,
+      "context": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
+      "long_context": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+      "masked_text": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 [MASK] 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
+      "answer": "启",
       "target_role": "object",
       "target_span": [
         15,
         16
       ],
-      "subject": "武丁",
+      "subject": "大禹",
       "subject_attributes": [
         "ENTITY",
         "PERSON"
       ],
-      "relation": "APPOINT",
-      "relation_type": "APPOINT",
-      "relation_surface": "任命",
-      "relation_evidence": "武丁 就 任命 说 为 宰相 。",
-      "object": "说",
+      "relation": "PARENT_OF",
+      "relation_type": "PARENT_OF",
+      "relation_surface": "儿子",
+      "relation_evidence": "治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在",
+      "object": "启",
       "object_attributes": [
         "ENTITY",
         "PERSON"
       ],
-      "grammar": "APPOINTMENT",
+      "grammar": "KINSHIP",
       "answer_attributes": [
         "ENTITY",
         "PERSON"
       ],
-      "confidence": 0.96,
-      "confidence_basis": "source_span_verified+pattern_match",
-      "subject_resolution": "explicit_nearest",
+      "confidence": 0.95,
+      "confidence_basis": "source_span_verified+explicit_relation_pattern",
+      "subject_resolution": "explicit_relation",
       "distractors": [
-        "蒯通",
-        "楚庄王",
-        "平原君",
-        "夫差",
-        "张耳"
+        "伍子胥",
+        "孙膑",
+        "孟尝君",
+        "陈胜",
+        "章邯"
+      ],
+      "variants": [
+        {
+          "type": "long_context_masked",
+          "context": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+          "masked_text": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 [MASK] 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+          "answer": "启",
+          "target_role": "object",
+          "answer_attributes": [
+            "ENTITY",
+            "PERSON"
+          ],
+          "target_span": [
+            52,
+            53
+          ]
+        }
+      ],
+      "split": "test",
+      "relation_direction": "parent_to_child",
+      "linked_entity": {
+        "left": "大禹",
+        "right": "启"
+      },
+      "fact_id": "shiji_fact_0002"
+    },
+    {
+      "fact_group_id": "line_13_KINSHIP_0_2",
+      "source_line": 13,
+      "context": "禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。",
+      "long_context": "由于 鲧 的 态度顽固 ， 民愤 又 很大 ， 最后 舜 将 他 处死 。 当时 水患 仍然 很 严重 ， 舜 征求 一些 官员 的 意见 ， 看 谁 能 担任 这个 治水 的 工作 ， 大家 都 说 禹 最合适 。 禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。 有 一天 晚上 她 忽然 看到 一颗 流星 穿过 昴 星 ， 睡 了 以后 ， 在 梦 中 又 看到 了 这 一 情景 ， 于是 心中 产生 了 一种 特殊 的 反应 。 第二天 ， 她 吃 了 一颗 神珠 薏苡 ， 胸脯 突然 觉得 疼痛 ， 随即 裂开 了 ， 胸膛 里 有 个 小孩 ， 这个 小孩 就是 禹 。",
+      "masked_text": "禹 是 [MASK] 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。",
+      "answer": "鲧",
+      "target_role": "object",
+      "target_span": [
+        2,
+        3
+      ],
+      "subject": "禹",
+      "subject_attributes": [
+        "ENTITY",
+        "PERSON"
+      ],
+      "relation": "CHILD_OF",
+      "relation_type": "CHILD_OF",
+      "relation_surface": "儿子",
+      "relation_evidence": "禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ，",
+      "object": "鲧",
+      "object_attributes": [
+        "ENTITY",
+        "PERSON"
+      ],
+      "grammar": "KINSHIP",
+      "answer_attributes": [
+        "ENTITY",
+        "PERSON"
+      ],
+      "confidence": 0.95,
+      "confidence_basis": "source_span_verified+explicit_relation_pattern",
+      "subject_resolution": "explicit_relation",
+      "distractors": [
+        "郑国",
+        "廉颇",
+        "项羽",
+        "勾践",
+        "齐桓公"
       ],
       "variants": [],
       "split": "train",
-      "role": "宰相",
-      "role_attributes": [
-        "ENTITY",
-        "TITLE"
-      ],
+      "relation_direction": "child_to_parent",
+      "linked_entity": {
+        "left": "禹",
+        "right": "鲧"
+      },
       "fact_id": "shiji_fact_0003"
     }
   ]

@@ -71,6 +71,17 @@
 
 遗忘率只能说明旧能力有没有被破坏，不能代替事实答案准确率。
 
+当前事实数据构建入口是 `examples/build_shiji_fact_dataset.py`。它扫描仓库现有的
+`data/shiji/segmented/shiji_segmented.txt`（当前 10,631 行），输出结构化事实清单和
+报告。事实清单除了任命、攻伐、战果、籍贯，还包含标题—人物、别名、本名/字号、
+父子、祖孙、兄弟、婚姻和世系边；每条关系保留规范的 `relation_type`、方向、双方
+实体及 `source_line`，同一源行固定划分到同一 split，避免长上下文变体泄漏。
+
+这表示当前仓库语料已经被批量扫描，不表示所有章节的关系都已经人工核验完成。
+报告中的关系覆盖率只统计命中明确词典/句式规则的源行；分词粘连、代词缺少同句
+先行词或语义需要跨段落判断的关系仍会被保守跳过，训练前应继续做事实盲测和噪声
+抽检。
+
 ## 三维动态 Q/K 路由（当前采用方案）
 
 静态三维组合负责训练时的梯度通道保护；动态三维 Q/K 负责推理时为注意力提供关系专用的附加通道。两者使用同一个关系/空间注册表，但职责不同。
@@ -117,7 +128,9 @@
 
 训练期间需要保存旧事实锚点的路由分布，并加入路由保持约束，例如 `KL(alpha_old || alpha_new)`，避免事实训练导致旧事实突然切换到另一套空间。路由指标还应记录候选数量、top-1/top-k 命中率、space 使用频率和路由熵，防止所有 token 坍缩到同一个 space。
 
-当前动态 MLM 实验入口是 `examples/bert_mlm_dynamic_word_spaces.py`，默认使用项目已有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`，从随机初始化开始训练，不依赖旧 checkpoint。
+原始动态 MLM 实验入口是 `examples/bert_mlm_dynamic_word_spaces.py`，默认使用项目已有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`，从随机初始化开始训练，不依赖旧 checkpoint。新事实记忆主线的移植入口是 `examples/train_shiji_fact_memory_dynamic_qk.py`：它使用事实样本的 relation triple 作为候选空间集合，用当前位置 contextual hidden 计算路由，并在后续 attention 层的 softmax 前加入 relation-specific 3×3 Q/K 分数；原 `train_shiji_fact_memory_local_relation_margin_v2.py` 保留为静态输出侧 adapter 对照。
+
+为控制事实分支的参数规模，新主线的 Q/K 矩阵直接作用于 relation triple 指定的三个 hidden 维度，形状为 `layer × head × relation × 3 × 3`；它保留了旧方案的上下文路由和逐 head 动态 Q/K 语义，但没有复制旧 bank 中完整 hidden-to-3D 的 `P_q/P_k` 投影。
 
 ## 后置阶段：生成式问答
 

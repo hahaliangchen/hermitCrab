@@ -72,12 +72,52 @@ class LocalRelationBilinearAdapter(nn.Module):
         return int(self.relation_triples.shape[0])
 
     def indices_for_triples(self, triples: Iterable[Sequence[int]]) -> List[int]:
-        indices = {
-            self._relation_to_index[_normalize_triple(triple)]
-            for triple in triples
-            if _normalize_triple(triple) in self._relation_to_index
-        }
+        indices = set()
+        for triple in triples:
+            normalized = _normalize_triple(triple)
+            if normalized in self._relation_to_index:
+                indices.add(self._relation_to_index[normalized])
         return sorted(indices)
+
+    def mask_gradients(
+        self,
+        gradients: Sequence[torch.Tensor],
+        active_indices: Sequence[int],
+    ) -> List[torch.Tensor]:
+        """Keep only the relation rows active for this update.
+
+        The base adapter has one relation-scoped parameter.  Dynamic Q/K
+        adapters override this hook because their layer/head matrices use a
+        different relation axis and also contain shared router parameters.
+        """
+        if len(gradients) != 1:
+            raise ValueError("base relation adapter expects one gradient tensor")
+        gradient = gradients[0].detach().clone()
+        mask = torch.zeros(
+            gradient.shape[0], dtype=gradient.dtype, device=gradient.device
+        )
+        if active_indices:
+            mask[list(active_indices)] = 1.0
+        return [gradient * mask.view(-1, 1, 1)]
+
+    def relation_gradient_vector(
+        self,
+        gradients: Sequence[torch.Tensor],
+        relation_index: int,
+    ) -> torch.Tensor:
+        if len(gradients) != 1:
+            raise ValueError("base relation adapter expects one gradient tensor")
+        return gradients[0][int(relation_index)].reshape(-1)
+
+    def scale_relation_gradient(
+        self,
+        gradients: Sequence[torch.Tensor],
+        relation_index: int,
+        scale: float,
+    ) -> List[torch.Tensor]:
+        result = [gradient.detach().clone() for gradient in gradients]
+        result[0][int(relation_index)] *= float(scale)
+        return result
 
     def forward(
         self,
@@ -164,12 +204,16 @@ class LocalRelationMarginBertForMaskedLM(
         apply_grammar_attributes: bool = True,
         apply_frequency_prior: bool = True,
         relation_triples: Optional[Iterable[Sequence[int]]] = None,
+        candidate_space_mask: Optional[torch.Tensor] = None,
     ):
-        sequence_output, _, all_attentions = self.bert(
+        relation_triples = list(relation_triples or [])
+        sequence_output, _, all_attentions = self._encode_sequence(
             input_ids,
             token_type_ids,
             attention_mask,
             output_attentions=output_attentions,
+            relation_triples=relation_triples,
+            candidate_space_mask=candidate_space_mask,
         )
         base_logits = self.lm_head(sequence_output)
         local_relation_bias = self.relation_adapter(
@@ -185,6 +229,7 @@ class LocalRelationMarginBertForMaskedLM(
             input_ids,
             scale=self.attribute_bias_scale,
         )
+
         fallback_mask = self._fallback_mask(input_ids)
         frequency_bias = self.frequency_bias(input_ids, fallback_mask)
         logits = raw_logits
@@ -206,6 +251,24 @@ class LocalRelationMarginBertForMaskedLM(
             logits,
             all_attentions,
             grammar_info,
+        )
+
+    def _encode_sequence(
+        self,
+        input_ids: torch.LongTensor,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+        relation_triples: Optional[Sequence[Sequence[int]]] = None,
+        candidate_space_mask: Optional[torch.Tensor] = None,
+    ):
+        """Encode the sequence; dynamic attention subclasses override this."""
+        del relation_triples, candidate_space_mask
+        return self.bert(
+            input_ids,
+            token_type_ids,
+            attention_mask,
+            output_attentions=output_attentions,
         )
 
     @staticmethod
@@ -256,12 +319,14 @@ class LocalRelationMarginBertForMaskedLM(
         apply_grammar_attributes: bool = True,
         apply_frequency_prior: bool = True,
         relation_triples: Optional[Iterable[Sequence[int]]] = None,
+        candidate_space_mask: Optional[torch.Tensor] = None,
         margin_target_id: Optional[int] = None,
         hard_negative_ids: Optional[Sequence[int]] = None,
         margin_weight: float = 0.0,
         margin_value: Optional[float] = None,
         return_grammar_info: bool = False,
         return_component_info: bool = False,
+        return_route_weights: bool = False,
         **kwargs,
     ):
         (
@@ -280,6 +345,7 @@ class LocalRelationMarginBertForMaskedLM(
             apply_grammar_attributes=apply_grammar_attributes,
             apply_frequency_prior=apply_frequency_prior,
             relation_triples=relation_triples,
+            candidate_space_mask=candidate_space_mask,
         )
 
         margin_loss = logits.sum() * 0.0
@@ -312,6 +378,8 @@ class LocalRelationMarginBertForMaskedLM(
         grammar_info["margin_loss"] = margin_loss.detach()
         if return_grammar_info:
             result = result + (grammar_info,)
+        if return_route_weights:
+            result = result + (getattr(self, "_last_route_weights", None),)
         if return_component_info:
             result = result + (
                 {
@@ -333,18 +401,23 @@ class LocalRelationMarginBertForMaskedLM(
             "w",
             encoding="utf-8",
         ) as handle:
+            adapter_config = {
+                "model_class": self.__class__.__name__,
+                "adapter_type": "3x3_bilinear_relation_matrix",
+                "hidden_size": self.config.hidden_size,
+                "relation_count": self.relation_adapter.relation_count,
+                "relation_triples": [
+                    triple.tolist()
+                    for triple in self.relation_adapter.relation_triples
+                ],
+                "margin_value": self.margin_value,
+            }
+            if hasattr(self, "relation_score_scale"):
+                adapter_config["relation_score_scale"] = float(
+                    self.relation_score_scale
+                )
             json.dump(
-                {
-                    "model_class": self.__class__.__name__,
-                    "adapter_type": "3x3_bilinear_relation_matrix",
-                    "hidden_size": self.config.hidden_size,
-                    "relation_count": self.relation_adapter.relation_count,
-                    "relation_triples": [
-                        triple.tolist()
-                        for triple in self.relation_adapter.relation_triples
-                    ],
-                    "margin_value": self.margin_value,
-                },
+                adapter_config,
                 handle,
                 ensure_ascii=False,
                 indent=2,

@@ -1,4 +1,9 @@
-"""Train fact memory with routed 3x3 relation adapters and margin loss."""
+"""Train fact memory with routed 3x3 adapters and margin loss.
+
+The default adapter is the MLM-side relation matrix.  Dynamic-Q/K entry
+points can replace the model class and reuse the same update loop; all
+relation-scoped adapter parameters then share the replay/conflict guard.
+"""
 
 from __future__ import annotations
 
@@ -82,6 +87,7 @@ def _forward_loss(
     sample: Dict[str, object],
     margin_weight: float,
     margin_value: float,
+    return_route_weights: bool = False,
 ):
     return model(
         input_ids=sample["input_ids"],
@@ -98,6 +104,7 @@ def _forward_loss(
         margin_weight=margin_weight,
         margin_value=margin_value,
         return_grammar_info=True,
+        return_route_weights=return_route_weights,
     )
 
 
@@ -122,42 +129,78 @@ def _active_adapter_indices(
     return model.relation_adapter.indices_for_triples(triples)
 
 
+def _gradient_norm(gradients: Sequence[torch.Tensor]) -> float:
+    squared = sum(
+        float(gradient.detach().float().pow(2).sum().item())
+        for gradient in gradients
+    )
+    return squared ** 0.5
+
+
+def _route_diagnostics(
+    route_weights: Optional[torch.Tensor],
+    attention_mask: torch.Tensor,
+) -> Dict[str, float]:
+    if route_weights is None:
+        return {
+            "route_entropy": 0.0,
+            "route_active_spaces": 0.0,
+            "route_candidate_count": 0.0,
+        }
+    valid = attention_mask.bool().to(device=route_weights.device)
+    probabilities = route_weights[valid]
+    if probabilities.numel() == 0:
+        return {
+            "route_entropy": 0.0,
+            "route_active_spaces": 0.0,
+            "route_candidate_count": 0.0,
+        }
+    entropy = (
+        -probabilities.clamp_min(1e-9)
+        * probabilities.clamp_min(1e-9).log()
+    ).sum(-1).mean()
+    return {
+        "route_entropy": float(entropy.item()),
+        "route_active_spaces": float(
+            (probabilities.sum(0) > 0.0).sum().item()
+        ),
+        "route_candidate_count": float(
+            probabilities.gt(0.0).sum(-1).float().mean().item()
+        ),
+    }
+
+
 def _combine_adapter_gradients(
     model: LocalRelationMarginBertForMaskedLM,
-    new_gradient: torch.Tensor,
-    old_gradient: torch.Tensor,
+    new_gradients: Sequence[torch.Tensor],
+    old_gradients: Sequence[torch.Tensor],
     new_triples: Sequence[Triple],
     old_triples: Sequence[Triple],
     replay_weight: float,
     soft_conflict_threshold: float,
     soft_conflict_scale: float,
-) -> Tuple[torch.Tensor, Dict[str, float]]:
-    """Keep the strong update on active adapters and replay old adapter rows."""
-    new_gradient = new_gradient.detach().clone()
-    old_gradient = old_gradient.detach().clone()
+) -> Tuple[List[torch.Tensor], Dict[str, float]]:
+    """Keep strong active adapter updates and replay old adapter rows.
+
+    The original adapter has one ``[relation, 3, 3]`` parameter.  The dynamic
+    Q/K adapter adds relation-indexed layer/head matrices and shared router
+    parameters, so the adapter owns the masking/block-vector hooks used here.
+    """
+    if len(new_gradients) != len(old_gradients):
+        raise ValueError("new and replay adapter gradients have different lengths")
     new_indices = _active_adapter_indices(model, new_triples)
     old_indices = _active_adapter_indices(model, old_triples)
-
-    new_mask = torch.zeros(
-        new_gradient.shape[0], dtype=new_gradient.dtype, device=new_gradient.device
-    )
-    old_mask = torch.zeros(
-        old_gradient.shape[0], dtype=old_gradient.dtype, device=old_gradient.device
-    )
-    if new_indices:
-        new_mask[new_indices] = 1.0
-    if old_indices:
-        old_mask[old_indices] = 1.0
-    new_gradient = new_gradient * new_mask.view(-1, 1, 1)
-    old_gradient = old_gradient * old_mask.view(-1, 1, 1)
+    adapter = model.relation_adapter
+    new_gradient = adapter.mask_gradients(new_gradients, new_indices)
+    old_gradient = adapter.mask_gradients(old_gradients, old_indices)
 
     shared = sorted(set(new_indices).intersection(old_indices))
     checked = 0
     conflicts = 0
     cosines: List[float] = []
     for index in shared:
-        new_block = new_gradient[index].reshape(-1)
-        old_block = old_gradient[index].reshape(-1)
+        new_block = adapter.relation_gradient_vector(new_gradient, index)
+        old_block = adapter.relation_gradient_vector(old_gradient, index)
         new_norm = float(new_block.norm().item())
         old_norm = float(old_block.norm().item())
         if new_norm <= 1e-12 or old_norm <= 1e-12:
@@ -167,17 +210,30 @@ def _combine_adapter_gradients(
             new_norm * old_norm, 1e-12
         )
         if cosine < soft_conflict_threshold:
-            new_gradient[index] = new_gradient[index] * soft_conflict_scale
+            new_gradient = adapter.scale_relation_gradient(
+                new_gradient,
+                index,
+                soft_conflict_scale,
+            )
             conflicts += 1
             cosines.append(cosine)
 
-    return new_gradient + float(replay_weight) * old_gradient, {
+    accepted = [
+        new_gradient_value + float(replay_weight) * old_gradient_value
+        for new_gradient_value, old_gradient_value in zip(
+            new_gradient, old_gradient
+        )
+    ]
+    return accepted, {
         "active_relation_adapters": float(len(new_indices)),
         "replay_relation_adapters": float(len(old_indices)),
         "shared_relation_adapters": float(len(shared)),
         "checked_relation_adapters": float(checked),
         "soft_conflict_adapters": float(conflicts),
         "worst_adapter_conflict_cosine": min(cosines, default=0.0),
+        "new_adapter_gradient_norm": _gradient_norm(new_gradient),
+        "replay_adapter_gradient_norm": _gradient_norm(old_gradient),
+        "accepted_adapter_gradient_norm": _gradient_norm(accepted),
     }
 
 
@@ -239,9 +295,14 @@ def _run_update(
         sample,
         margin_weight=relation_margin_weight,
         margin_value=relation_margin_value,
+        return_route_weights=True,
     )
     new_loss = new_result[0]
     new_info = new_result[3]
+    route_stats = _route_diagnostics(
+        new_result[4] if len(new_result) > 4 else None,
+        sample["attention_mask"],
+    )
     new_gradients = base._gradient_tuple(new_loss, all_parameters)
 
     old_loss_value = 0.0
@@ -273,18 +334,86 @@ def _run_update(
     )
     accepted_adapter, adapter_stats = _combine_adapter_gradients(
         model,
-        new_adapter[0],
-        old_adapter[0],
+        new_adapter,
+        old_adapter,
         sample.get("relation_triples", []),
         old_triples,
         replay_weight if memory else 0.0,
         soft_conflict_threshold,
         soft_conflict_scale,
     )
-    accepted_gradients = accepted_global + [accepted_adapter]
+    adapter_before = [parameter.detach().clone() for parameter in adapter_parameters]
+    relation_matrix_before = model.relation_adapter.relation_matrix.detach().clone()
+    dynamic_qk = getattr(model.relation_adapter, "dynamic_qk", None)
+    dynamic_qk_before = []
+    if dynamic_qk is not None:
+        dynamic_qk_before = [
+            dynamic_qk.q_matrix.detach().clone(),
+            dynamic_qk.k_matrix.detach().clone(),
+        ]
+    accepted_gradients = accepted_global + accepted_adapter
     for parameter, gradient in zip(all_parameters, accepted_gradients):
         parameter.grad = gradient
     optimizer.step()
+
+    adapter_update_norm = _gradient_norm(
+        [parameter.detach() - before for parameter, before in zip(adapter_parameters, adapter_before)]
+    )
+    matrix_update_norm = float(
+        (model.relation_adapter.relation_matrix.detach() - relation_matrix_before)
+        .float()
+        .norm()
+        .item()
+    )
+    relation_matrix_index = next(
+        index
+        for index, parameter in enumerate(adapter_parameters)
+        if parameter is model.relation_adapter.relation_matrix
+    )
+    adapter_stats.update(
+        {
+            "adapter_parameter_norm": _gradient_norm(
+                [parameter.detach() for parameter in adapter_parameters]
+            ),
+            "adapter_update_norm": adapter_update_norm,
+            "relation_matrix_gradient_norm": float(
+                accepted_adapter[relation_matrix_index]
+                .detach()
+                .float()
+                .norm()
+                .item()
+            ),
+            "relation_matrix_norm": float(
+                model.relation_adapter.relation_matrix.detach().float().norm().item()
+            ),
+            "relation_matrix_nonzero_rows": float(
+                model.relation_adapter.relation_matrix.detach()
+                .float()
+                .norm(dim=(1, 2))
+                .gt(1e-12)
+                .sum()
+                .item()
+            ),
+            "relation_matrix_update_norm": matrix_update_norm,
+        }
+    )
+    if dynamic_qk is not None:
+        adapter_stats["dynamic_qk_gradient_norm"] = _gradient_norm(
+            [
+                accepted_adapter[index]
+                for index, parameter in enumerate(adapter_parameters)
+                if parameter is dynamic_qk.q_matrix or parameter is dynamic_qk.k_matrix
+            ]
+        )
+        adapter_stats["dynamic_qk_update_norm"] = _gradient_norm(
+            [
+                parameter.detach() - before
+                for parameter, before in zip(
+                    (dynamic_qk.q_matrix, dynamic_qk.k_matrix),
+                    dynamic_qk_before,
+                )
+            ]
+        )
 
     position = int(sample["fact_position"]) if "fact_position" in sample else -1
     target_margin = 0.0
@@ -303,6 +432,7 @@ def _run_update(
         "hard_negative_margin_before_update": hard_margin,
         "replay_loss": old_loss_value,
         "replay_index": float(replay_index if replay_index is not None else -1),
+        **route_stats,
         **adapter_stats,
     }
 
@@ -512,6 +642,10 @@ def train(
     global_background_weight: float = 0.02,
     relation_margin_value: float = 2.0,
     relation_margin_weight: float = 0.25,
+    relation_score_scale: Optional[float] = None,
+    dynamic_qk_score_scale: Optional[float] = None,
+    route_start_layer: Optional[int] = None,
+    route_dim: Optional[int] = None,
     soft_conflict_threshold: float = -0.35,
     soft_conflict_scale: float = 0.85,
     mlm_probability: float = 0.15,
@@ -603,17 +737,43 @@ def train(
         )
 
     relation_triples = list(allocator.relation_triples.values())
+    model_kwargs = {
+        "relation_triples": relation_triples,
+        "frequency_prior": frequency_prior,
+        "frequency_class_scales": frequency_class_scales,
+        "attribute_filter": initial_model.grammar_attribute_filter,
+        "attribute_bias_scale": attribute_bias_scale,
+        "constrained_frequency_gate": constrained_frequency_gate,
+        "margin_value": relation_margin_value,
+    }
+    optional_model_kwargs = {
+        "relation_score_scale": relation_score_scale,
+        "dynamic_qk_score_scale": dynamic_qk_score_scale,
+        "route_start_layer": route_start_layer,
+        "route_dim": route_dim,
+    }
+    model_kwargs.update(
+        {
+            key: value
+            for key, value in optional_model_kwargs.items()
+            if value is not None
+        }
+    )
     model = LocalRelationMarginBertForMaskedLM(
         initial_model.config,
         tokenizer,
-        relation_triples=relation_triples,
-        frequency_prior=frequency_prior,
-        frequency_class_scales=frequency_class_scales,
-        attribute_filter=initial_model.grammar_attribute_filter,
-        attribute_bias_scale=attribute_bias_scale,
-        constrained_frequency_gate=constrained_frequency_gate,
-        margin_value=relation_margin_value,
+        **model_kwargs,
     ).to(torch.device("cpu"))
+    if relation_score_scale is not None:
+        actual_relation_score_scale = getattr(model, "relation_score_scale", None)
+        if actual_relation_score_scale is None or abs(
+            float(actual_relation_score_scale) - float(relation_score_scale)
+        ) > 1e-12:
+            raise RuntimeError(
+                "relation_score_scale configuration did not reach the model: "
+                f"requested={relation_score_scale}, "
+                f"actual={actual_relation_score_scale}"
+            )
     model.bert.load_state_dict(initial_model.bert.state_dict(), strict=True)
     model.lm_head.weight = model.bert.embeddings.word_embeddings.weight
     for parameter in model.grammar_attribute_filter.parameters():
@@ -795,6 +955,15 @@ def train(
         "replay_weight": replay_weight,
         "relation_margin_value": relation_margin_value,
         "relation_margin_weight": relation_margin_weight,
+        "relation_score_scale": getattr(model, "relation_score_scale", None),
+        "dynamic_qk_enabled": bool(
+            hasattr(model.relation_adapter, "dynamic_qk")
+        ),
+        "dynamic_qk_score_scale": getattr(
+            model.relation_adapter, "dynamic_qk_score_scale", None
+        ),
+        "route_start_layer": getattr(model, "route_start_layer", None),
+        "route_dim": getattr(model, "route_dim", None),
         "frequency_prior_frozen": True,
         "frequency_prior_learning_rate": 0.0,
         "frequency_content_scale": frequency_content_scale,
@@ -850,6 +1019,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--global-background-weight", type=float, default=0.02)
     parser.add_argument("--relation-margin-value", type=float, default=2.0)
     parser.add_argument("--relation-margin-weight", type=float, default=0.25)
+    parser.add_argument("--relation-score-scale", type=float, default=None)
+    parser.add_argument("--dynamic-qk-score-scale", type=float, default=None)
+    parser.add_argument("--route-start-layer", type=int, default=None)
+    parser.add_argument("--route-dim", type=int, default=None)
     parser.add_argument("--soft-conflict-threshold", type=float, default=-0.35)
     parser.add_argument("--soft-conflict-scale", type=float, default=0.85)
     parser.add_argument("--mlm-probability", type=float, default=0.15)

@@ -28,6 +28,7 @@ dataset_impl._ensure_fact_positions = _ensure_fact_positions
 
 import train_shiji_fact_memory_local_relation_margin_impl as implementation
 from bert_simple.local_relation_adapter_model_v2 import (
+    DEFAULT_RELATION_SCORE_SCALE,
     ScaledLocalRelationMarginBertForMaskedLM,
 )
 
@@ -65,6 +66,7 @@ def _run_with_sgd() -> str:
             global_background_weight=0.02,
             relation_margin_value=2.0,
             relation_margin_weight=0.25,
+            relation_score_scale=DEFAULT_RELATION_SCORE_SCALE,
         )
     finally:
         torch.optim.AdamW = original_adamw
@@ -83,7 +85,7 @@ if __name__ == "__main__":
                 "relation_adapter_update_weight": 1.0,
                 "relation_adapter_type": "3x3_bilinear_relation_matrix",
                 "candidate_key_normalization": "l2",
-                "relation_score_scale": 24.0,
+                "relation_score_scale": DEFAULT_RELATION_SCORE_SCALE,
                 "relation_learning_rate": 0.0005,
                 "margin_value": 2.0,
                 "margin_weight": 0.25,
