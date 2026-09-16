@@ -1,4 +1,10 @@
-"""Run the fact-memory experiment with contextual dynamic Q/K attention."""
+"""[历史对照] Run the old fact-memory experiment with contextual dynamic Q/K.
+
+The imported legacy implementation still allocates token-pair relation
+triples.  The current context-group sidecar is
+``train_full_relation_filter_stages.py``; this entry point is kept only for
+old-result comparison and must not be used to produce the new relation bank.
+"""
 
 from __future__ import annotations
 

@@ -398,6 +398,17 @@ def _run_update(
         }
     )
     if dynamic_qk is not None:
+        structured_scores = getattr(dynamic_qk, "structured_scores", None)
+        if structured_scores is not None:
+            ffn_ids = {id(parameter) for parameter in structured_scores.parameters()}
+            adapter_stats["relation_ffn_gradient_norm"] = _gradient_norm(
+                [gradient for parameter, gradient in zip(adapter_parameters, accepted_adapter)
+                 if id(parameter) in ffn_ids]
+            )
+            adapter_stats["relation_ffn_update_norm"] = _gradient_norm(
+                [parameter.detach() - old for parameter, old in zip(adapter_parameters, adapter_before)
+                 if id(parameter) in ffn_ids]
+            )
         adapter_stats["dynamic_qk_gradient_norm"] = _gradient_norm(
             [
                 accepted_adapter[index]
@@ -646,6 +657,10 @@ def train(
     dynamic_qk_score_scale: Optional[float] = None,
     route_start_layer: Optional[int] = None,
     route_dim: Optional[int] = None,
+    relation_ffn_hidden_size: Optional[int] = None,
+    relation_ffn_scale: Optional[float] = None,
+    relation_ffn_chunk_size: Optional[int] = None,
+    correction_probe_every: int = 0,
     soft_conflict_threshold: float = -0.35,
     soft_conflict_scale: float = 0.85,
     mlm_probability: float = 0.15,
@@ -659,6 +674,8 @@ def train(
 ) -> str:
     if fact_epochs < 1 or fact_repeats < 1:
         raise ValueError("fact_epochs and fact_repeats must be positive")
+    if correction_probe_every < 0 or (correction_probe_every and not relation_ffn_hidden_size):
+        raise ValueError("correction probes require an enabled relation FFN and a nonnegative interval")
     if not 0.0 <= global_background_weight <= 1.0:
         raise ValueError("global_background_weight must be between 0 and 1")
     base.set_seed(seed)
@@ -751,6 +768,9 @@ def train(
         "dynamic_qk_score_scale": dynamic_qk_score_scale,
         "route_start_layer": route_start_layer,
         "route_dim": route_dim,
+        "relation_ffn_hidden_size": relation_ffn_hidden_size,
+        "relation_ffn_scale": relation_ffn_scale,
+        "relation_ffn_chunk_size": relation_ffn_chunk_size,
     }
     model_kwargs.update(
         {
@@ -842,6 +862,17 @@ def train(
             for repeat in range(fact_repeats):
                 for fact_index, sample in enumerate(fact_train):
                     global_step += 1
+                    before_probe = None
+                    if correction_probe_every and global_step % correction_probe_every == 0:
+                        from bert_simple.relation_correction import (
+                            capture_relation_snapshot, analyze_relation_correction,
+                        )
+                        probe_inputs = {
+                            key: sample[key] for key in
+                            ("input_ids", "token_type_ids", "attention_mask")
+                        }
+                        probe_inputs["relation_triples"] = sample.get("relation_triples", [])
+                        before_probe = capture_relation_snapshot(model, **probe_inputs)
                     stats = _run_update(
                         model,
                         all_parameters,
@@ -879,6 +910,15 @@ def train(
                         "fact_token": sample["fact_token"],
                         **stats,
                     }
+                    if before_probe is not None:
+                        record["correction_probe"] = analyze_relation_correction(
+                            model, before_probe, int(sample["fact_token_id"]),
+                            only_corrected=True, **probe_inputs,
+                        )
+                        record["correction_probe"]["tokens"] = [
+                            tokenizer.id_to_token[int(i)] for i in sample["input_ids"][0]
+                        ]
+                        before_probe = None
                     log_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
                     if local_step % log_every == 0 or local_step == total_steps:
                         log_handle.flush()
@@ -964,6 +1004,9 @@ def train(
         ),
         "route_start_layer": getattr(model, "route_start_layer", None),
         "route_dim": getattr(model, "route_dim", None),
+        "relation_ffn_hidden_size": getattr(model, "relation_ffn_hidden_size", 0),
+        "relation_ffn_scale": getattr(model, "relation_ffn_scale", None),
+        "correction_probe_every": correction_probe_every,
         "frequency_prior_frozen": True,
         "frequency_prior_learning_rate": 0.0,
         "frequency_content_scale": frequency_content_scale,

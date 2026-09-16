@@ -1,4 +1,8 @@
-"""标准 BERT MLM + 关系三维组合更新实验。
+"""[历史对照] 标准 BERT MLM + token-pair 三维组合更新实验。
+
+本文件及其调用方保留用于复现实验结果，不属于当前关系架构。它把 token pair
+映射到三维坐标，正是当前方案已经废弃的知识记忆式分配；新的训练入口必须使用
+``bert_simple.context_spaces.build_context_space_triples`` 和上下文组评分。
 
 与 bert_mlm_v_conflict.py 的区别：
 
@@ -52,7 +56,7 @@ Triple = Tuple[int, int, int]
 
 
 class DimensionCombinationAllocator:
-    """从 C(hidden_size, 3) 中顺序分配且可复用三维组合。"""
+    """历史 token-pair allocator；当前训练禁止使用。"""
 
     def __init__(self, hidden_size: int):
         if hidden_size < 3:

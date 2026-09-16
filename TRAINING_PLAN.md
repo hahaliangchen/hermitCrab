@@ -84,17 +84,19 @@
 
 ## 三维动态 Q/K 路由（当前采用方案）
 
-静态三维组合负责训练时的梯度通道保护；动态三维 Q/K 负责推理时为注意力提供关系专用的附加通道。两者使用同一个关系/空间注册表，但职责不同。
+三维通道不是事实 ID，也不是 token 两两组合的注册表。动态三维 Q/K 的职责是给
+上下文注意力提供可复用的附加通道；关系事实由每个位置自己的 contextual hidden、
+完整上下文组和特殊 FFN 共同判断。
 
-当前采用“候选 map + 可学习路由 QK”的方案：
+当前方案是“固定共享 bank + 位置级可学习 route”：
 
-1. `token -> candidate space ids` 的 map 只保存候选空间引用，不为每个 token 复制一套矩阵。
-2. 每个 space 维护可学习的三维 `P_q/P_k` 和 `A_q/A_k`，另维护一个用于路由的 space descriptor 向量。
-3. 路由 query 由当前位置的上下文表示产生，路由 key 由候选 space descriptor 产生；只在该 token 的候选 map 内计算匹配分数。
-4. 训练时使用 softmax 权重混合候选 space 的三维 Q/K；推理时可以使用 top-k space 降低计算量。
-5. 路由选择通过显式的 `candidate_space_mask` 和 `route_weights` 传入 attention，不保存在 attention 模块的可变状态中。
-6. 动态 bank 按 `layer × head × space` 保存三维参数，使每个 attention head 都有自己的 local score。
-7. 空间拆分默认使用 `conflict_threshold=-0.5`，并要求连续 5 步冲突，避免轻微负余弦或属性 gate 的梯度变化导致过度拆分。
+1. `build_context_space_triples(256, candidate_count=1500)` 建立 1500 个固定共享三维候选；其中前 86 个基础通道覆盖全部 256 个 hidden 维度，其余候选提供额外可复用容量；不按 token、词对、事实或句子分配新空间。
+2. 每个 space 维护可学习的 `3×3 Q/K` 和 route descriptor；它们是共享容量，不携带具体词义标签。
+3. 第 1 层普通相对位置 BERT 为每个位置产生自己的 `h_t`；route query 从这个 `h_t` 计算，route key 从共享 descriptor 计算。
+4. 同一句中两个相同 token 也会因各自的上下文和相对邻接不同而得到不同 route；route 不存进 attention 的可变状态。
+5. attention 内部可以计算 token 对的局部 logit，但关系 sidecar 的训练单位是完整上下文组：先聚合全部关系成员，再由特殊 FFN 判断 MASK 与该组是否匹配。
+6. 动态 bank 按 `layer × head × shared-space` 保存三维参数，使每个 attention head 都有自己的 local score；不再保存或读取旧的 `dimension_combination_map.json`。
+7. 旧的冲突拆分/词对分配脚本只作为历史对照，不是当前训练入口；新的 `examples/train_full_relation_filter_stages.py` 按 FFN → route → Q/K 三阶段训练。
 8. 动态模型额外保存 `dynamic_model_config.json`，`DynamicWordSpaceBertForMaskedLM.from_pretrained()` 可以自行重建 bank 和 route 配置。
 9. BERT 的位置关系使用相对位置 bias，而不是把绝对位置向量加到 token embedding；因此 route 输入看到的是上下文和相对距离，不会把句子整体偏移当成新的绝对语义。
 
@@ -128,9 +130,9 @@
 
 训练期间需要保存旧事实锚点的路由分布，并加入路由保持约束，例如 `KL(alpha_old || alpha_new)`，避免事实训练导致旧事实突然切换到另一套空间。路由指标还应记录候选数量、top-1/top-k 命中率、space 使用频率和路由熵，防止所有 token 坍缩到同一个 space。
 
-原始动态 MLM 实验入口是 `examples/bert_mlm_dynamic_word_spaces.py`，默认使用项目已有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`，从随机初始化开始训练，不依赖旧 checkpoint。新事实记忆主线的移植入口是 `examples/train_shiji_fact_memory_dynamic_qk.py`：它使用事实样本的 relation triple 作为候选空间集合，用当前位置 contextual hidden 计算路由，并在后续 attention 层的 softmax 前加入 relation-specific 3×3 Q/K 分数；原 `train_shiji_fact_memory_local_relation_margin_v2.py` 保留为静态输出侧 adapter 对照。
+原始动态 MLM 实验入口是 `examples/bert_mlm_dynamic_word_spaces.py`，默认使用项目已有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`，从随机初始化开始训练，不依赖旧 checkpoint。关系 sidecar 的当前入口是 `examples/train_full_relation_filter_stages.py`：它使用固定共享 bank、当前位置 contextual hidden 和完整关系上下文组，在特殊 FFN → route → 动态 Q/K 三阶段训练；旧的 token-pair allocator 与 `train_shiji_fact_memory_dynamic_qk.py` 仅保留作历史对照，不能作为当前泛化训练入口。
 
-为控制事实分支的参数规模，新主线的 Q/K 矩阵直接作用于 relation triple 指定的三个 hidden 维度，形状为 `layer × head × relation × 3 × 3`；它保留了旧方案的上下文路由和逐 head 动态 Q/K 语义，但没有复制旧 bank 中完整 hidden-to-3D 的 `P_q/P_k` 投影。
+为控制事实分支的参数规模，新主线的 Q/K 矩阵直接作用于固定共享 bank 指定的三个 hidden 维度，形状为 `layer × head × shared-space × 3 × 3`；它保留逐 head 动态 Q/K 语义，但没有复制旧 bank 中完整 hidden-to-3D 的 `P_q/P_k` 投影，也不把某个事实绑定到某个坐标三元组。
 
 ## 后置阶段：生成式问答
 

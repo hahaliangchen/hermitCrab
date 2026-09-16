@@ -1,4 +1,8 @@
-"""Train word-level BERT MLM from the structured Shiji fact manifest.
+"""[历史对照] Train word-level BERT MLM from the structured Shiji fact manifest.
+
+This module uses the retired token-pair allocator to reproduce earlier
+fact-memory runs.  The active relation design uses the fixed shared context
+bank and complete context groups in ``train_full_relation_filter_stages.py``.
 
 The manifest is deliberately kept separate from the model.  This entry point
 turns each exact ``masked_text -> answer`` record into an MLM sample, uses the

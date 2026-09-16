@@ -4,14 +4,15 @@ The model has two separate attention paths:
 
 * The first BERT layer is ordinary self-attention and creates a contextual
   hidden state for every token position.
-* From ``route_start_layer`` onward, a learnable route Q/K scores the
-  candidate spaces allowed by the token/context map.  The selected soft
+* From ``route_start_layer`` onward, a learnable route Q/K scores the same
+  fixed shared context bank for every valid position.  The selected soft
   weights mix space-specific 3D Q/K scores into a per-head local attention
   bias, which is added to ordinary BERT attention.
 
-The registry is only a candidate map and usage record.  It never supplies a
-forward route by itself.  Route weights are computed inside each forward pass
-and are passed explicitly to attention, so one call cannot affect the next.
+The registry is only a post-forward usage record.  It never supplies a word
+or word-pair candidate map.  Route weights are computed inside each forward
+pass and are passed explicitly to attention, so one call cannot affect the
+next.
 """
 
 from __future__ import annotations
@@ -49,30 +50,31 @@ DEFAULT_OUTPUT_DIR = os.path.abspath(
 DYNAMIC_CONFIG_NAME = "dynamic_model_config.json"
 
 
-class WordSpaceRegistry:
-    """Token-to-candidate-space map and non-parametric usage bookkeeping.
+class ContextSpaceRegistry:
+    """Fixed shared context-space usage bookkeeping.
 
-    ``word_to_spaces`` contains references to candidate spaces, not copies of
-    their matrices.  A few initial spaces are exposed to every regular token
-    so the learnable router has more than one candidate from the first step.
-    New spaces may be added only after a strong conflict persists for several
-    steps; a single noisy cosine is not enough to split a space.
+    This registry deliberately has no ``token -> space`` map and no allocator.
+    Every valid position sees the same fixed bank; its contextual hidden state
+    decides the route during the forward pass.  The registry only records
+    diagnostics after the update, so it cannot turn a word pair into a fact
+    identifier or leave state inside attention.
     """
 
     def __init__(
         self,
         tokenizer: combination_base.SimpleBertTokenizer,
         max_spaces: int,
-        initial_spaces: int = 4,
+        initial_spaces: Optional[int] = None,
     ):
         if max_spaces < 1:
             raise ValueError("max_spaces must be positive")
-        if not 1 <= initial_spaces <= max_spaces:
-            raise ValueError("initial_spaces must be between 1 and max_spaces")
-        self.max_spaces = max_spaces
-        self.initial_spaces = initial_spaces
-        self.active_spaces = initial_spaces
-        self.word_to_spaces: Dict[int, Set[int]] = {}
+        if initial_spaces is not None and initial_spaces < 1:
+            raise ValueError("initial_spaces must be positive when supplied")
+        self.max_spaces = int(max_spaces)
+        # Kept as a compatibility field for old summaries; it no longer means
+        # that only a prefix of the bank is visible.
+        self.initial_spaces = self.max_spaces
+        self.active_spaces = self.max_spaces
         self.space_contexts: List[Counter] = [Counter() for _ in range(max_spaces)]
         self.space_usage: List[int] = [0 for _ in range(max_spaces)]
         self.special_ids = {
@@ -83,48 +85,13 @@ class WordSpaceRegistry:
         }
         self.mask_token_id = tokenizer.mask_token_id
         self.tokenizer = tokenizer
-        self._seed_initial_candidates()
-
-    def _seed_initial_candidates(self) -> None:
-        initial = set(range(self.initial_spaces))
-        for token_id in range(len(self.tokenizer)):
-            if token_id not in self.special_ids and token_id != self.mask_token_id:
-                self.word_to_spaces[token_id] = set(initial)
-
-    def allocate(self) -> int:
-        if self.active_spaces >= self.max_spaces:
-            raise RuntimeError("dynamic local-space capacity exhausted")
-        space_id = self.active_spaces
-        self.active_spaces += 1
-        return space_id
 
     def candidates(self, token_id: int) -> List[int]:
-        candidates = self.word_to_spaces.get(int(token_id))
-        if not candidates:
-            candidates = set(range(min(self.initial_spaces, self.active_spaces)))
-        choices = sorted(space for space in candidates if space < self.active_spaces)
-        return choices or [0]
-
-    def _context_candidates(self, input_ids: Sequence[int], valid: Sequence[int]) -> Set[int]:
-        spaces: Set[int] = set()
-        for token_id, is_valid in zip(input_ids, valid):
-            if (
-                is_valid
-                and token_id not in self.special_ids
-                and token_id != self.mask_token_id
-            ):
-                spaces.update(self.candidates(int(token_id)))
-        if not spaces:
-            spaces.update(range(self.active_spaces))
-        return spaces
+        del token_id
+        return list(range(self.active_spaces))
 
     def candidate_mask(self, sample: Dict[str, object]) -> torch.Tensor:
-        """Build ``[batch, sequence, max_spaces]`` candidate references.
-
-        A masked position cannot use its gold label to choose candidates.  It
-        uses the union of candidate spaces exposed by visible context tokens.
-        This keeps the MLM route free of target leakage.
-        """
+        """Expose the same fixed context bank at every valid position."""
 
         input_ids = sample["input_ids"]
         attention_mask = sample["attention_mask"]
@@ -140,27 +107,13 @@ class WordSpaceRegistry:
             dtype=torch.bool,
             device=input_ids.device,
         )
-        for batch_index in range(batch_size):
-            row_ids = [int(value) for value in input_ids[batch_index].tolist()]
-            row_valid = [int(value) for value in attention_mask[batch_index].tolist()]
-            context_spaces = self._context_candidates(row_ids, row_valid)
-            for position, (token_id, is_valid) in enumerate(zip(row_ids, row_valid)):
-                if not is_valid:
-                    continue
-                if token_id == self.mask_token_id:
-                    choices = context_spaces
-                elif token_id in self.special_ids:
-                    choices = {0}
-                else:
-                    choices = set(self.candidates(token_id))
-                for space_id in choices:
-                    if 0 <= space_id < self.active_spaces:
-                        result[batch_index, position, space_id] = True
+        # Broadcast is performed by the indexed assignment into the bounded
+        # destination.  There is no token-pair lookup and no repeated bank.
+        result[...] = attention_mask.bool().unsqueeze(-1)
         return result
 
     def touched_token_ids(self, sample: Dict[str, object]) -> Set[int]:
         input_ids = sample["input_ids"]
-        labels = sample["labels"]
         attention_mask = sample["attention_mask"]
         if input_ids.ndim == 1:
             input_ids = input_ids.unsqueeze(0)
@@ -188,13 +141,11 @@ class WordSpaceRegistry:
         attention_mask = sample["attention_mask"]
         if input_ids.ndim == 1:
             input_ids = input_ids.unsqueeze(0)
-        if labels.ndim == 1:
-            labels = labels.unsqueeze(0)
         if attention_mask.ndim == 1:
             attention_mask = attention_mask.unsqueeze(0)
         top_spaces = route_weights.detach().argmax(dim=-1).cpu().tolist()
-        for batch_index, (row_ids, row_labels, row_valid) in enumerate(
-            zip(input_ids.tolist(), labels.tolist(), attention_mask.tolist())
+        for batch_index, (row_ids, row_valid) in enumerate(
+            zip(input_ids.tolist(), attention_mask.tolist())
         ):
             context = {
                 int(token_id)
@@ -203,22 +154,17 @@ class WordSpaceRegistry:
                 and token_id not in self.special_ids
                 and token_id != self.mask_token_id
             }
-            for position, (token_id, label, is_valid) in enumerate(
-                zip(row_ids, row_labels, row_valid)
-            ):
+            for position, (token_id, is_valid) in enumerate(zip(row_ids, row_valid)):
                 if not is_valid:
                     continue
-                target_id = int(label) if label >= 0 else int(token_id)
-                if target_id in self.special_ids or target_id == self.mask_token_id:
+                token_id = int(token_id)
+                if token_id in self.special_ids or token_id == self.mask_token_id:
                     continue
                 space_id = int(top_spaces[batch_index][position])
                 if not 0 <= space_id < self.active_spaces:
                     continue
-                self.word_to_spaces.setdefault(target_id, set(range(self.initial_spaces))).add(
-                    space_id
-                )
                 self.space_contexts[space_id].update(
-                    other for other in context if other != target_id
+                    other for other in context if other != token_id
                 )
                 self.space_usage[space_id] += 1
 
@@ -228,18 +174,7 @@ class WordSpaceRegistry:
             return set()
         return {int(value) for value in nonzero[:, -1].tolist()}
 
-    def attach_words(self, word_ids: Iterable[int], space_id: int) -> None:
-        for token_id in set(int(word_id) for word_id in word_ids):
-            if token_id not in self.special_ids and token_id != self.mask_token_id:
-                self.word_to_spaces.setdefault(token_id, set(range(self.initial_spaces))).add(
-                    space_id
-                )
-
     def to_json(self) -> Dict[str, object]:
-        mapping = {}
-        for token_id, spaces in sorted(self.word_to_spaces.items()):
-            if 0 <= token_id < len(self.tokenizer.id_to_token):
-                mapping[self.tokenizer.id_to_token[token_id]] = sorted(spaces)
         space_summary = []
         for space_id in range(self.active_spaces):
             context_tokens = [
@@ -255,10 +190,10 @@ class WordSpaceRegistry:
                 }
             )
         return {
+            "space_allocation": "fixed_shared_context_bank",
             "active_spaces": self.active_spaces,
             "max_spaces": self.max_spaces,
             "initial_spaces": self.initial_spaces,
-            "word_to_spaces": mapping,
             "spaces": space_summary,
         }
 
@@ -268,24 +203,12 @@ class WordSpaceRegistry:
         tokenizer: combination_base.SimpleBertTokenizer,
         path: str,
         max_spaces: Optional[int] = None,
-    ) -> "WordSpaceRegistry":
+    ) -> "ContextSpaceRegistry":
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
         stored_max = int(data.get("max_spaces", max_spaces or 1))
         capacity = max_spaces or stored_max
-        registry = cls(
-            tokenizer,
-            max_spaces=capacity,
-            initial_spaces=min(int(data.get("initial_spaces", 1)), capacity),
-        )
-        registry.active_spaces = min(int(data.get("active_spaces", 1)), capacity)
-        registry.word_to_spaces = {}
-        for token, spaces in data.get("word_to_spaces", {}).items():
-            token_id = tokenizer.token_to_id.get(token)
-            if token_id is not None:
-                registry.word_to_spaces[int(token_id)] = {
-                    int(space) for space in spaces if 0 <= int(space) < registry.active_spaces
-                }
+        registry = cls(tokenizer, max_spaces=capacity)
         for summary in data.get("spaces", []):
             space_id = int(summary.get("space_id", -1))
             if not 0 <= space_id < capacity:
@@ -296,6 +219,11 @@ class WordSpaceRegistry:
                 if token_id is not None:
                     registry.space_contexts[space_id][int(token_id)] += 1
         return registry
+
+
+# Compatibility name for callers that imported the old registry.  Its new
+# implementation is fixed-bank/context-only and has no token-to-space map.
+WordSpaceRegistry = ContextSpaceRegistry
 
 
 ATTRIBUTE_NAMES = (
@@ -1315,6 +1243,7 @@ class DynamicWordSpaceBertForMaskedLM(combination_base.BertForMaskedLM):
         torch.save(self.state_dict(), os.path.join(save_directory, "pytorch_model.bin"))
         metadata = {
             "format_version": 3,
+            "space_allocation": "fixed_shared_context_bank",
             "max_spaces": self.space_bank.max_spaces,
             "route_dim": self.route_dim,
             "route_start_layer": self.route_start_layer,
@@ -1533,8 +1462,8 @@ def train(
         raise ValueError("route_start_layer must leave at least one dynamic layer")
     if epochs < 1:
         raise ValueError("epochs must be positive")
-    if not 1 <= initial_spaces <= max_spaces:
-        raise ValueError("initial_spaces must be between 1 and max_spaces")
+    if initial_spaces < 1:
+        raise ValueError("initial_spaces must be positive")
     if conflict_patience < 1:
         raise ValueError("conflict_patience must be positive")
     if log_every < 1:
@@ -1576,7 +1505,9 @@ def train(
         hidden_size=hidden_size,
         route_dim=route_dim,
     )
-    registry = WordSpaceRegistry(tokenizer, max_spaces, initial_spaces=initial_spaces)
+    # All positions see one fixed shared context bank.  ``initial_spaces`` is
+    # retained only for CLI compatibility and is intentionally ignored.
+    registry = ContextSpaceRegistry(tokenizer, max_spaces)
     model = DynamicWordSpaceBertForMaskedLM(
         config,
         bank=bank,
@@ -1628,8 +1559,6 @@ def train(
 
     memory: List[Dict[str, object]] = []
     memory_by_source: Dict[int, Dict[str, object]] = {}
-    slot_history: Dict[int, torch.Tensor] = {}
-    conflict_streak: Dict[int, int] = {}
     logs: List[Dict[str, object]] = []
     total_added_spaces = 0
     total_conflict_slots = 0
@@ -1658,58 +1587,10 @@ def train(
                     total_replay_steps += 1
                     total_replay_overlap += replay_overlap
 
-                # Probe only for the conflict decision.  The real update below
-                # is recomputed after a possible new candidate space is added.
-                optimizer.zero_grad(set_to_none=True)
-                probe_loss = _loss_for_sample(model, new_sample)
-                probe_gradients = combination_base._gradient_tuple(
-                    probe_loss, parameters
-                )
-                _assign_gradients(parameters, probe_gradients)
-                active_current = registry.active_ids_from_mask(
-                    new_sample["candidate_space_mask"]
-                )
                 conflicted: List[Tuple[int, float]] = []
-                for space_id in sorted(active_current):
-                    current_gradient = bank.slot_gradient_vector(space_id)
-                    previous_gradient = slot_history.get(space_id)
-                    current_norm = float(current_gradient.norm().item())
-                    previous_norm = (
-                        float(previous_gradient.norm().item())
-                        if previous_gradient is not None
-                        else 0.0
-                    )
-                    if previous_gradient is None or current_norm <= 1e-12 or previous_norm <= 1e-12:
-                        continue
-                    cosine = float(
-                        torch.dot(current_gradient, previous_gradient).item()
-                        / max(current_norm * previous_norm, 1e-12)
-                    )
-                    if cosine < conflict_threshold:
-                        conflict_streak[space_id] = conflict_streak.get(space_id, 0) + 1
-                        total_conflicts_observed += 1
-                        if conflict_streak[space_id] >= conflict_patience:
-                            conflicted.append((space_id, cosine))
-                    else:
-                        conflict_streak[space_id] = 0
-
                 added_this_step = 0
-                if conflicted and registry.active_spaces < max_spaces:
-                    old_space, _ = min(conflicted, key=lambda item: item[1])
-                    new_space = registry.allocate()
-                    bank.initialize_slot(new_space, source_slot=old_space)
-                    registry.attach_words(new_sample["touched_token_ids"], new_space)
-                    conflict_streak[old_space] = 0
-                    model.active_spaces = registry.active_spaces
-                    added_this_step = 1
-                    total_added_spaces += 1
-                    total_conflict_slots += len(conflicted)
-                    # Old memories keep their fixed MLM targets but receive the
-                    # expanded candidate map for the next replay.
-                    for item in memory:
-                        item["sample"]["candidate_space_mask"] = registry.candidate_mask(
-                            item["sample"]
-                        )
+                # The bank is fixed for the whole run.  No gradient conflict can
+                # create another space and no token is attached to a space.
                 new_sample["candidate_space_mask"] = registry.candidate_mask(new_sample)
 
                 optimizer.zero_grad(set_to_none=True)
@@ -1750,18 +1631,6 @@ def train(
                     for value in route_weights.argmax(dim=-1)[valid_positions].tolist()
                     if 0 <= int(value) < registry.active_spaces
                 }
-                for space_id in registry.active_ids_from_mask(
-                    new_sample["candidate_space_mask"]
-                ):
-                    current_gradient = bank.slot_gradient_vector(space_id)
-                    if float(current_gradient.norm().item()) <= 1e-12:
-                        continue
-                    previous_gradient = slot_history.get(space_id)
-                    if previous_gradient is None:
-                        slot_history[space_id] = current_gradient.clone()
-                    else:
-                        slot_history[space_id] = 0.8 * previous_gradient + 0.2 * current_gradient
-
                 if sample_index not in memory_by_source:
                     memory_item = {
                         "sample": new_sample,
@@ -1821,7 +1690,7 @@ def train(
     model.save_pretrained(output_path, active_spaces=registry.active_spaces)
     tokenizer.save_pretrained(output_path)
     with open(
-        os.path.join(output_path, "word_space_registry.json"), "w", encoding="utf-8"
+        os.path.join(output_path, "context_space_registry.json"), "w", encoding="utf-8"
     ) as handle:
         json.dump(registry.to_json(), handle, ensure_ascii=False, indent=2)
     with open(
@@ -1830,6 +1699,7 @@ def train(
         json.dump(attribute_registry.to_json(), handle, ensure_ascii=False, indent=2)
     summary = {
         "stage": "bert_mlm_contextual_learnable_3d_route",
+        "space_allocation": "fixed_shared_context_bank",
         "training_file": resolved_training_file,
         "device": "cpu",
         "sentences": len(texts),
@@ -1841,7 +1711,7 @@ def train(
         "intermediate_size": intermediate_size,
         "max_length": max_length,
         "local_space_capacity": max_spaces,
-        "initial_local_spaces": initial_spaces,
+        "initial_local_spaces": max_spaces,
         "active_local_spaces": registry.active_spaces,
         "total_added_spaces": total_added_spaces,
         "total_conflict_slots": total_conflict_slots,
@@ -1861,12 +1731,6 @@ def train(
         "replay_weight": replay_weight,
         "replay_steps": total_replay_steps,
         "total_replay_overlap_tokens": total_replay_overlap,
-        "word_mapping_links": sum(
-            len(spaces) for spaces in registry.word_to_spaces.values()
-        ),
-        "words_with_multiple_spaces": sum(
-            1 for spaces in registry.word_to_spaces.values() if len(spaces) > 1
-        ),
         "final_memory_loss": logs[-1]["memory_loss"],
         "final_forgetting": logs[-1]["forgetting"],
     }
@@ -1876,7 +1740,7 @@ def train(
         encoding="utf-8",
     ) as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
-    print(f"Saved dynamic word-space outputs to {output_path}")
+    print(f"Saved contextual shared-space outputs to {output_path}")
     return output_path
 
 
@@ -1897,7 +1761,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--replay-weight", type=float, default=0.5)
     parser.add_argument("--max-spaces", type=int, default=32)
-    parser.add_argument("--initial-spaces", type=int, default=4)
+    parser.add_argument(
+        "--initial-spaces", type=int, default=4,
+        help="deprecated compatibility option; the fixed bank is fully visible",
+    )
     parser.add_argument("--route-dim", type=int, default=32)
     parser.add_argument("--route-start-layer", type=int, default=1)
     parser.add_argument("--local-score-scale", type=float, default=0.5)
@@ -1912,8 +1779,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--known-seed-filter-penalty", type=float, default=8.0
     )
-    parser.add_argument("--conflict-threshold", type=float, default=-0.5)
-    parser.add_argument("--conflict-patience", type=int, default=5)
+    parser.add_argument(
+        "--conflict-threshold", type=float, default=-0.5,
+        help="deprecated compatibility option; no spaces are split",
+    )
+    parser.add_argument(
+        "--conflict-patience", type=int, default=5,
+        help="deprecated compatibility option; no spaces are split",
+    )
     parser.add_argument("--mlm-probability", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--log-every", type=int, default=100)

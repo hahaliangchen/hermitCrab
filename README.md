@@ -1,5 +1,17 @@
 # BERT Simple（三维关系与动态 Q/K 实验版）
 
+### 18 维关系 FFN 与纠错回退（实验功能）
+
+数据生成规范见 [RELATION_TRAINING_DATA_SPEC.md](RELATION_TRAINING_DATA_SPEC.md)，
+实现说明见 [RELATION_FFN_IMPLEMENTATION.md](RELATION_FFN_IMPLEMENTATION.md)。
+协议 v2 与成对训练的改进说明见 [RELATION_TRAINING_V2_IMPROVEMENTS.md](RELATION_TRAINING_V2_IMPROVEMENTS.md)。
+架构诊断与问题复盘日志见 [PROBLEM_LOG_RELATION_SUBSPACE_AND_GENERALIZATION_2026-09-16.md](PROBLEM_LOG_RELATION_SUBSPACE_AND_GENERALIZATION_2026-09-16.md)。
+动态事实模型可设置 `relation_ffn_hidden_size=32` 开启共享的 18→32→1 FFN。
+默认关闭以兼容旧模型；新 JSONL 请用 `examples/train_relation_pairs.py`，包含全词表 CE、
+负例 margin、不变性对称 KL，以及抽样纠错回退。训练与答题共用不读取答案的候选策略。
+`examples/train_shiji_structured_relation.py` 保留为旧 manifest 对照，其答案条件候选不能
+用于证明未知答案泛化。尚无真实数据泛化效果结论。
+
 这是一个极简的 BERT 实现，当前用于研究三维关系组合、动态三维 Q/K 和事实记忆保持。Matrix-Free 方向已废弃，不再作为当前架构目标。
 
 ## 核心特性 (为什么它很特别)
@@ -10,7 +22,7 @@
 
 ### 2. 三维动态关系通道
 *   **静态三维组合**: 训练时限制和保护关系更新通道，允许共享参数小幅适应，严重冲突时再隔离。
-*   **动态三维 Q/K**: `examples/bert_mlm_dynamic_word_spaces.py` 先用普通 BERT 第一层生成每个位置的上下文表示，再用可学习 route Q/K 选择候选 space；后续层使用每个 head 独立的动态三维局部分数。
+*   **动态三维 Q/K**: 先用普通 BERT 第一层生成每个位置自己的上下文表示，再由可学习 route Q/K 在固定共享三维通道 bank 中选择权重；后续层使用每个 head 独立的动态三维局部分数。空间不按 token 对、事实或句子新增。
 *   **相对位置注意力**: 新模型不再把绝对位置向量加到 token 上，而是在每个 attention head 的 QK 分数中加入有方向的相对距离 bias；序列整体平移不会改变位置关系。
 *   **可调试性**: 模型支持 `output_attentions=True`，也会记录路由熵、候选数量和 space 使用情况。
 *   **独立语法—词属性过滤器**: `bert_simple/grammar_filter.py` 使用独立 embedding、相对位置注意力、8 维 `g_t` 和 8 维 `h_t`，通过独立 Q/K 预测属性兼容度。过滤器不读取主 BERT hidden，不更新主模型，主模型权重改变也不会改变过滤器输出。旧 checkpoint 的耦合属性 gate 保留兼容，新推理入口绕过它，避免重复降权。
@@ -34,19 +46,25 @@ python examples/bert_mlm_dynamic_word_spaces.py \
 *   **流程**:
     1.  扫描文件以构建动态词表。
     2.  从头开始训练一个使用相对位置注意力的 BERT 掩码语言模型 (MLM)。
-    3.  训练并保存模型、三维空间注册表和 `word_attribute_registry.json` 到 `outputs/bert-mlm-dynamic-word-spaces-contextual`。
+    3.  训练并保存模型、固定共享三维空间使用统计和 `word_attribute_registry.json` 到 `outputs/bert-mlm-dynamic-word-spaces-contextual`。
 
-如果不提供文件参数，动态三维 Q/K 脚本会默认读取项目中现有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`。训练从随机初始化开始，不依赖旧权重；默认使用 CPU、hidden_size=256，可以通过命令行参数调整训练轮数和路由空间数量。
+如果不提供文件参数，动态三维 Q/K 脚本会默认读取项目中现有的 `examples/shiji_baihua_zhangchen_gaozu_long_context.txt`。训练从随机初始化开始，不依赖旧权重；默认使用 CPU、hidden_size=256，可以通过命令行参数调整训练轮数和共享路由空间数量。旧的 `word_to_spaces`/词对注册表不再生成。
 
 ### 事实记忆分支中的动态 Q/K
 
-当前事实记忆主线保留了 MLM 输出侧的 3×3 relation matrix，同时把上下文路由的动态 Q/K 接入 `route_start_layer` 之后的 self-attention。候选 relation 由样本提供，但具体路由由当前 hidden state 通过 router 动态计算；局部 Q/K 分数在 attention softmax 之前加入。relation matrix、动态 Q/K 矩阵和 router 一起进入 adapter 更新组，训练日志会记录它们的梯度范数与实际更新范数。
+当前事实记忆主线保留了 MLM 输出侧的 3×3 relation matrix，同时把上下文路由的动态 Q/K 接入 `route_start_layer` 之后的 self-attention。固定共享 bank 默认有 1500 个候选，其中前 86 个基础通道覆盖完整 256 维；具体路由由当前 token 位置自己的 contextual hidden 通过 router 动态计算。关系 sidecar 训练时把 MASK 对应的全部关系上下文成员先聚合，再由特殊 FFN 判断整组上下文是否支持答案，不能退化为 `词A || 词B` 的事实空间。局部 Q/K 分数在 attention softmax 之前加入。relation matrix、动态 Q/K 矩阵和 router 一起进入 adapter 更新组，训练日志会记录它们的梯度范数与实际更新范数。
 
 ```bash
-python examples/train_shiji_fact_memory_dynamic_qk.py
+python examples/train_full_relation_filter_stages.py \
+  --base-checkpoint outputs/bert-mlm-fact-memory-shiji-grammar-attribute-256/before_fact \
+  --dataset data/shiji/manifests/relation_training_v2_draft.jsonl \
+  --output outputs/context-relation-filter-full256-stage1 \
+  --memory-budget-mb 1024
 ```
 
-该入口使用统一的 `relation_score_scale=24.0`。原有 `train_shiji_fact_memory_local_relation_margin_v2.py` 仍可作为不含 attention 动态 Q/K 的对照实验，方便比较动态 Q/K 对事实记忆和遗忘的影响。
+该入口先冻结主 BERT，按特殊 FFN → contextual route → 动态 Q/K 三阶段训练关系 sidecar。
+原有 `train_shiji_fact_memory_dynamic_qk.py` 和 `train_shiji_fact_memory_local_relation_margin_v2.py`
+仍可作为历史/静态对照，但它们的 token-pair allocator 结果不能作为当前泛化方案或新训练入口。
 
 ### 关系增强的《史记》事实记忆数据
 

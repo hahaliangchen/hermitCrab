@@ -10,9 +10,11 @@ path into the current fact-memory stack:
 * the existing MLM-side relation matrix remains available as a separate
   additive fact-memory component.
 
-The candidate set is still supplied by the sample's relation triples.  The
-route within that set is not supplied by the sample: it is computed from the
-current contextual hidden states.
+The low-level adapter keeps ``relation_triples`` as a compatibility name for
+the three-coordinate channel list.  In the current contextual sidecar that
+list is a fixed shared bank exposed to every valid position; it is not a
+sample-specific fact or token-pair candidate set.  The route within the bank
+is computed from the current contextual hidden states.
 """
 
 from __future__ import annotations
@@ -35,12 +37,16 @@ from .local_relation_adapter_model_v2 import (
 )
 from .model import BertConfig, _build_relative_position_bias
 from .tokenizer import SimpleBertTokenizer
+from .structured_relation import StructuredRelationScores
 
 
 Triple = Tuple[int, int, int]
 DEFAULT_DYNAMIC_QK_SCORE_SCALE = 0.5
 DEFAULT_ROUTE_START_LAYER = 1
 DEFAULT_ROUTE_DIM = 32
+# Keep the temporary [B,H,T,T,C] Q/K block comfortably bounded when the
+# current shared bank uses up to 1500 relation candidates.
+DEFAULT_RELATION_SPACE_CHUNK_SIZE = 128
 
 
 class DynamicQKRelationBank(nn.Module):
@@ -52,6 +58,7 @@ class DynamicQKRelationBank(nn.Module):
         num_layers: int,
         num_heads: int,
         route_dim: int,
+        relation_space_chunk_size: int = DEFAULT_RELATION_SPACE_CHUNK_SIZE,
     ):
         super().__init__()
         normalized = tuple(_normalize_triple(triple) for triple in relation_triples)
@@ -61,10 +68,19 @@ class DynamicQKRelationBank(nn.Module):
         self.route_dim = int(route_dim)
         self.space_dim = 3
         self.max_spaces = max(1, len(normalized))
+        self.relation_space_chunk_size = int(relation_space_chunk_size)
         if self.num_layers < 1 or self.num_heads < 1:
             raise ValueError("dynamic Q/K bank needs positive layer and head counts")
         if self.route_dim < 1:
             raise ValueError("route_dim must be positive")
+        if self.relation_space_chunk_size < 1:
+            raise ValueError("relation_space_chunk_size must be positive")
+
+        self.register_buffer(
+            "triple_indices",
+            torch.tensor(normalized, dtype=torch.long),
+            persistent=False,
+        )
 
         self.q_matrix = nn.Parameter(
             torch.empty(
@@ -139,28 +155,43 @@ class DynamicQKRelationBank(nn.Module):
 
         q_bank = self.q_matrix[int(layer_index)]
         k_bank = self.k_matrix[int(layer_index)]
-        for relation_index in active.tolist():
-            if relation_index >= len(self.relation_triples):
+        for relation_indices in active.split(self.relation_space_chunk_size):
+            if relation_indices.numel() == 0:
                 continue
-            dimensions = list(self.relation_triples[relation_index])
-            selected_hidden = hidden_states[..., dimensions]
-            q = torch.einsum(
-                "btd,hdm->bthm",
-                selected_hidden,
-                q_bank[:, relation_index],
+            dimensions = self.triple_indices.index_select(0, relation_indices).reshape(-1)
+            chunk_size = relation_indices.numel()
+            selected_hidden = hidden_states.index_select(-1, dimensions).reshape(
+                batch_size, sequence_length, chunk_size, self.space_dim
             )
-            k = torch.einsum(
-                "btd,hdm->bthm",
-                selected_hidden,
-                k_bank[:, relation_index],
-            )
-            pair_scores = torch.einsum("bthd,bjhd->bhtj", q, k)
-            weights = route_weights[..., relation_index]
-            pair_weights = weights.unsqueeze(1).unsqueeze(-1) * weights.unsqueeze(
-                1
+
+            # [B, 1, T, C, 1, 3] @ [1, H, 1, C, 3, 3]
+            # produces [B, H, T, C, 3].  C is bounded by the relation-space
+            # chunk size instead of materializing every active space at once.
+            left = selected_hidden.unsqueeze(1).unsqueeze(-2)
+            q_matrices = q_bank.index_select(1, relation_indices)
+            k_matrices = k_bank.index_select(1, relation_indices)
+            q = torch.matmul(
+                left,
+                q_matrices.unsqueeze(0).unsqueeze(2),
+            ).squeeze(-2).permute(0, 1, 3, 2, 4)
+            k = torch.matmul(
+                left,
+                k_matrices.unsqueeze(0).unsqueeze(2),
+            ).squeeze(-2).permute(0, 1, 3, 2, 4)
+            pair_scores = torch.matmul(q, k.transpose(-1, -2))
+
+            weights = route_weights.index_select(-1, relation_indices).transpose(1, 2)
+            pair_weights = torch.matmul(
+                weights.unsqueeze(-1), weights.unsqueeze(-2)
             ).unsqueeze(1)
-            scores = scores + pair_scores * pair_weights
-        return scores / math.sqrt(float(self.space_dim))
+            scores = scores + (pair_scores * pair_weights).sum(dim=2)
+        scores = scores / math.sqrt(float(self.space_dim))
+        if hasattr(self, "structured_scores"):
+            scores = scores + self.structured_scores(
+                layer_index, hidden_states, route_weights,
+                self.relation_triples, q_bank, k_bank,
+            )
+        return scores
 
 
 class ContextualRelationRouter(nn.Module):
@@ -180,14 +211,28 @@ class ContextualRelationRouter(nn.Module):
         contextual_hidden: torch.Tensor,
         space_descriptors: torch.Tensor,
         candidate_mask: torch.Tensor,
+        space_chunk_size: int = DEFAULT_RELATION_SPACE_CHUNK_SIZE,
     ) -> torch.Tensor:
         if candidate_mask.ndim != 3:
             raise ValueError("candidate_mask must have shape [batch, sequence, space]")
         if candidate_mask.shape[-1] != space_descriptors.shape[0]:
             raise ValueError("candidate_mask and descriptors have different widths")
+        if space_chunk_size < 1:
+            raise ValueError("space_chunk_size must be positive")
         query = F.normalize(self.query(contextual_hidden), dim=-1)
-        key = F.normalize(self.key(space_descriptors), dim=-1)
-        logits = torch.einsum("btr,sr->bts", query, key)
+        # The bank may contain up to the current 1500 shared descriptors.
+        # Project and match it in bounded chunks; the final logits are still
+        # concatenated because
+        # softmax must normalize over the complete candidate set, but no large
+        # descriptor activation is kept at once.
+        logits_parts = []
+        for start in range(0, space_descriptors.shape[0], space_chunk_size):
+            key = F.normalize(
+                self.key(space_descriptors[start:start + space_chunk_size]),
+                dim=-1,
+            )
+            logits_parts.append(torch.matmul(query, key.transpose(0, 1)))
+        logits = torch.cat(logits_parts, dim=-1)
         candidate_mask = candidate_mask.to(device=logits.device, dtype=torch.bool)
         has_candidate = candidate_mask.any(dim=-1)
         safe_mask = candidate_mask.clone()
@@ -246,6 +291,7 @@ class DynamicQKRelationBilinearAdapter(ScaledLocalRelationBilinearAdapter):
             contextual_hidden,
             self.dynamic_qk.space_descriptors,
             candidate_mask,
+            space_chunk_size=self.dynamic_qk.relation_space_chunk_size,
         )
 
     def dynamic_local_scores(
@@ -426,6 +472,9 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
         dynamic_qk_score_scale: float = DEFAULT_DYNAMIC_QK_SCORE_SCALE,
         route_start_layer: int = DEFAULT_ROUTE_START_LAYER,
         route_dim: int = DEFAULT_ROUTE_DIM,
+        relation_ffn_hidden_size: int = 0,
+        relation_ffn_scale: float = 0.1,
+        relation_ffn_chunk_size: int = 32,
     ):
         relation_triples = list(relation_triples)
         super().__init__(
@@ -457,6 +506,16 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
         )
         self.route_start_layer = int(route_start_layer)
         self.route_dim = int(route_dim)
+        if relation_ffn_hidden_size < 0:
+            raise ValueError("relation_ffn_hidden_size must be nonnegative")
+        self.relation_ffn_hidden_size = int(relation_ffn_hidden_size)
+        self.relation_ffn_scale = float(relation_ffn_scale)
+        self.relation_ffn_chunk_size = int(relation_ffn_chunk_size)
+        if self.relation_ffn_hidden_size:
+            self.relation_adapter.dynamic_qk.structured_scores = StructuredRelationScores(
+                self.relation_ffn_hidden_size, self.relation_ffn_scale,
+                self.relation_ffn_chunk_size,
+            )
         self.dynamic_qk_score_scale = float(dynamic_qk_score_scale)
         self._last_route_weights: Optional[torch.Tensor] = None
         for layer_index in range(route_start_layer, config.num_hidden_layers):
@@ -490,9 +549,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
         # keeps the forward candidate set and the gradient row mask identical;
         # a caller that wants the full bank can pass all relation triples.
         if active:
-            candidate_mask[..., active] = valid.unsqueeze(-1).expand(
-                -1, -1, len(active)
-            )
+            candidate_mask[..., active] = valid.unsqueeze(-1)
         return candidate_mask
 
     def _encode_sequence(
@@ -569,6 +626,9 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                     "relation_space_count": self.relation_adapter.relation_count,
                     "route_source": "contextual_hidden_states",
                     "attention_integration": "pre_softmax_local_qk_score",
+                    "relation_ffn_hidden_size": self.relation_ffn_hidden_size,
+                    "relation_ffn_scale": self.relation_ffn_scale,
+                    "relation_ffn_chunk_size": self.relation_ffn_chunk_size,
                 },
                 handle,
                 ensure_ascii=False,
@@ -644,6 +704,9 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                 dynamic_config.get("route_start_layer", DEFAULT_ROUTE_START_LAYER)
             ),
             route_dim=int(dynamic_config.get("route_dim", DEFAULT_ROUTE_DIM)),
+            relation_ffn_hidden_size=int(dynamic_config.get("relation_ffn_hidden_size", 0)),
+            relation_ffn_scale=float(dynamic_config.get("relation_ffn_scale", 0.1)),
+            relation_ffn_chunk_size=int(dynamic_config.get("relation_ffn_chunk_size", 32)),
         )
         model.load_state_dict(state_dict, strict=True)
         model.lm_head.weight = model.bert.embeddings.word_embeddings.weight

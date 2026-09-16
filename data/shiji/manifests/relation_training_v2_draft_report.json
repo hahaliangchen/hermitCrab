@@ -1,0 +1,75 @@
+{
+  "schema_version": 2,
+  "status": "draft_from_existing_fact_manifest_requires_manual_audit",
+  "source_manifest": "/home/goodtime/Documents/project/hermitCrab/data/shiji/manifests/fact_memory_dataset.json",
+  "source_text": "/home/goodtime/Documents/project/hermitCrab/data/shiji/sentences/shiji_sentences.txt",
+  "max_length": 128,
+  "groups": 193,
+  "facts": 386,
+  "samples": 772,
+  "split_groups": {
+    "dev": 10,
+    "test": 12,
+    "train": 171
+  },
+  "relation_type_fact_counts": {
+    "ALIAS_OF": 10,
+    "ANCESTOR_OF": 1,
+    "APPOINT": 40,
+    "BORN_IN": 16,
+    "CHILD_OF": 23,
+    "DESCENDANT_OF": 1,
+    "GRANDCHILD_OF": 6,
+    "GRANDPARENT_OF": 6,
+    "HAS_TITLE": 122,
+    "NEPHEW_OR_NIECE_OF": 1,
+    "PARENT_OF": 23,
+    "SIBLING_OF": 12,
+    "SPOUSE_OF": 2,
+    "TITLE_OF": 122,
+    "UNCLE_OR_AUNT_OF": 1
+  },
+  "surface_kind_sample_counts": {
+    "paraphrase": 14,
+    "source": 758
+  },
+  "variant_origin_counts": {
+    "context_window": 169,
+    "existing_variant": 203,
+    "punctuation_variant": 14
+  },
+  "skipped_groups": {
+    "context_cross_split": 25,
+    "no_valid_variant": 6,
+    "not_two_fact_group": 407,
+    "semantic_fact_cross_split": 37
+  },
+  "validator": {
+    "schema_v2_groups": 193,
+    "lexical_evidence_warnings": 218,
+    "train_samples": 684,
+    "invariance": 386,
+    "contrast": 193,
+    "train_groups": 171,
+    "test_samples": 48,
+    "test_groups": 12,
+    "dev_samples": 40,
+    "dev_groups": 10,
+    "unique_facts": 386,
+    "source_groups": 168,
+    "relation_types": 15,
+    "surface_kind_counts": {
+      "source": 758,
+      "paraphrase": 14
+    },
+    "evidence_kind_counts": {
+      "provided_source": 386
+    }
+  },
+  "notes": [
+    "Facts and source text are inherited from the existing conservative manifest.",
+    "Distractors are inherited and receive an audit-required reason; they are not independently proven here.",
+    "qualifiers are empty because the source manifest has no structured qualifier fields.",
+    "This draft is suitable for protocol/smoke training after review, not a final complete Shiji relation annotation."
+  ]
+}
