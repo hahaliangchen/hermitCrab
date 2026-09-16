@@ -60,7 +60,7 @@ class RelationDataValidationTests(unittest.TestCase):
             source_rows = [row_by_id[fact["fact_id"]] for fact in group["facts"]]
             self.assertEqual(_context_conflict_lines(source_rows, line_splits, coverage), [])
 
-        train_rows = [row_by_id[f"shiji_fact_{number:04d}"] for number in (395, 396)]
+        train_rows = [row for row in rows if row.get("source_line") == 4949]
         self.assertIn(4950, _context_conflict_lines(train_rows, line_splits, coverage))
 
     def test_builder_honors_small_max_lengths(self):

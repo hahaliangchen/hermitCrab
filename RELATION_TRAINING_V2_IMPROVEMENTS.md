@@ -22,7 +22,7 @@ v1 有 18D 关系 FFN、纠错回退和数据校验，但新 JSONL 无法直接�
 | 校验缺口 | 增加 Unicode/空白/标点归一化去重、角色模板、限定条件、可选词表检查 |
 | 事实真实性无法自动证明 | 字面覆盖给出 warning，来源支持/别名/负例真假仍明确需要审计 |
 | 长上下文跨 split | 读取原始逐句语料，检查 long_context 覆盖的 source line；与其他 split 冲突的整组跳过 |
-| max_length 只约束 variant | 基础样本、variant 都按含 CLS/SEP 的上限检查；超长关系组跳过，不静默截断 |
+| max/min length 只约束 variant | 基础样本、variant 都按至少 12 个内容 token 和含 CLS/SEP 的 256 上限检查；超长或过短关系组跳过，不静默截断 |
 | 背景变体过弱 | 优先按完整句/分句边界扩展，记录 background_spans；单纯标点变体只作为明确的 paraphrase 回退 |
 
 v1 校验兼容保留，但新生成数据统一交付 schema_version=2。v1 的裸角色名路径仍可读；
@@ -63,7 +63,8 @@ token-pair map，但训练目标和容量不能混为一谈。
 训练词表外输入/标签/负例直接拒绝。评估输入 OOV 映射 UNK，答案 OOV 计作失败，
 分别报告覆盖率，绝不把真实答案映射成 UNK 后算命中。
 
-默认从头训练 64 hidden / 2 layers / 4 heads / 4 spaces 的实验模型。
+默认从头训练 64 hidden / 2 layers / 4 heads / 4 spaces 的实验模型，长度上限为 256，
+内容下限为 12 token。
 `--init-checkpoint` 只接受由本新流程保存的 checkpoint，保留其模型/词表，重新创建
 优化器（warm start，不是断点精确续训）。不直接沿用旧答案条件空间的 checkpoint。
 训练用固定 epoch，最终评估 dev/test，不用 test 选择 checkpoint。
@@ -144,23 +145,20 @@ metrics 分 train/dev/test 报 Top-1、整组全对数量、invariance/contrast 
 
 已从 `data/shiji/manifests/fact_memory_dataset.json` 生成一份可供协议验证和人工审核的
 关系训练草稿：`data/shiji/manifests/relation_training_v2_draft.jsonl`，统计报告在同目录
-的 `relation_training_v2_draft_report.json`。当前包含 193 个 schema v2 组、386 个事实、
-772 个样本，按 split 分为 train/dev/test = 171/10/12 组。生成器只接收原事实清单中恰好
+的 `relation_training_v2_draft_report.json`。当前包含 185 个 schema v2 组、370 个事实、
+740 个样本，按 split 分为 train/dev/test = 163/10/12 组。生成器只接收原事实清单中恰好
 有两个事实的来源组，并跳过跨 split 的 37 个语义事实组、25 个长上下文跨 split 组和 407
-个单事实组，避免为了凑对比样本而制造泄漏或伪造事实。基础样本和变体都满足默认
-`max_length=128`（含 CLS/SEP）；变体优先使用完整句/分句背景并写入 `background_spans`。
+个单事实组，另跳过 11 个无法达到最短长度的组和 3 个无法生成有效变体的组，避免为了凑对比样本而制造泄漏或伪造事实。基础样本和变体都满足默认
+`min_tokens=12` 且 `max_length=256`（含 CLS/SEP）；生成器优先扩展到完整句/分句背景并写入
+`background_spans`，无法达到下限的组直接跳过。
 原始负例沿用清单中的 distractors，并标注为需要人工审核；当前有 218 条 lexical evidence
 warning，表示角色或抽象谓词没有逐字出现在引文中，不是事实已被自动证明。该文件是
 draft，不等同于一万多句史记原料的完整关系标注，训练前应按来源、别名、时间限定和负例
 逐组抽查。
 
-当前工作区默认 `.venv` 是 Python 3.14 且没有安装 PyTorch；数据校验、无依赖回归测试、
-Python 编译检查和 `git diff --check` 已通过。模型测试改用
-`/home/goodtime/project/rag-go/hermit_crab/.venv/bin/python`（Python 3.12.14、PyTorch
-2.14.0+cpu）运行：`test_structured_relation.py` 的 8 项、`test_relation_pairs.py` 的
-12 项全部通过。该环境提示缺少 NumPy，但不影响这些测试；运行更广泛实验前仍应按
-requirements.txt 补齐依赖。测试和 smoke test 不替代真实数据上的准确率实验，也没有
-使用或覆盖现有真实训练产物。
+当前 Windows 工作区已用 bundled Python 完成数据校验 5 项、`test_relation_pairs.py` 的
+12 项、Python 编译检查和 `git diff --check`；Windows `WorkingSetSize` smoke 读数正常。
+这些测试和 smoke test 不替代真实数据上的准确率实验，也没有使用或覆盖现有真实训练产物。
 
 已完成合成示例的端到端训练、每步纠错探测、模型/词表保存重载、独立预测 CLI、
 warm start、输出目录覆盖拒绝测试，以及协议字段/归一化泄漏/标签不影响前向的测试。

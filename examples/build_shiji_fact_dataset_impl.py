@@ -756,10 +756,33 @@ def make_long_context(
     sentences: Sequence[str],
     line_index: int,
     target_index: int,
-    window: int = 2,
+    window: int = 4,
+    min_tokens: int = 120,
+    max_tokens: int = 220,
 ) -> Tuple[str, str, int]:
-    start_line = max(0, line_index - window)
-    end_line = min(len(sentences), line_index + window + 1)
+    target_tokens = sentences[line_index].split()
+    target_token = target_tokens[target_index] if 0 <= target_index < len(target_tokens) else ""
+    start_line = line_index
+    end_line = line_index + 1
+    current_tokens = list(target_tokens)
+
+    while len(current_tokens) < min_tokens and (start_line > 0 or end_line < len(sentences)):
+        expanded = False
+        if start_line > 0:
+            left_tokens = sentences[start_line - 1].split()
+            if (not target_token or target_token not in left_tokens) and len(current_tokens) + len(left_tokens) <= max_tokens:
+                start_line -= 1
+                current_tokens = left_tokens + current_tokens
+                expanded = True
+        if end_line < len(sentences):
+            right_tokens = sentences[end_line].split()
+            if (not target_token or target_token not in right_tokens) and len(current_tokens) + len(right_tokens) <= max_tokens:
+                end_line += 1
+                current_tokens = current_tokens + right_tokens
+                expanded = True
+        if not expanded:
+            break
+
     long_tokens: List[str] = []
     absolute_target = -1
     for index in range(start_line, end_line):

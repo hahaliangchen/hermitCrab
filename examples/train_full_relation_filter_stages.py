@@ -21,9 +21,11 @@ experiment and must not be used as a semantic relation bank.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import hashlib
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -48,7 +50,12 @@ from bert_simple.context_spaces import (  # noqa: E402
 from bert_simple.structured_relation import StructuredRelationScores  # noqa: E402
 from bert_simple.tokenizer import SimpleBertTokenizer  # noqa: E402
 from train_frozen_relation_filter import _sample_positions  # noqa: E402
-from validate_relation_training_data import load_groups, validate_groups  # noqa: E402
+from validate_relation_training_data import (  # noqa: E402
+    DEFAULT_MIN_RELATION_TOKENS,
+    DEFAULT_RELATION_MAX_LENGTH,
+    load_groups,
+    validate_groups,
+)
 
 
 DEFAULT_BASE_CHECKPOINT = (
@@ -61,8 +68,47 @@ DEFAULT_CONTEXT_SPACE_COUNT = DEFAULT_RELATION_CANDIDATE_COUNT
 Triple = Tuple[int, int, int]
 
 
+class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+    _fields_ = [
+        ("cb", ctypes.c_ulong),
+        ("PageFaultCount", ctypes.c_ulong),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
 def _current_rss_bytes() -> int:
-    """Return current resident memory without adding a dependency on psutil."""
+    """Return process resident memory on Windows and Linux without psutil."""
+    if os.name == "nt":
+        try:
+            counters = _PROCESS_MEMORY_COUNTERS()
+            counters.cb = ctypes.sizeof(counters)
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            get_current_process = kernel32.GetCurrentProcess
+            get_current_process.restype = ctypes.c_void_p
+            get_process_memory_info = psapi.GetProcessMemoryInfo
+            get_process_memory_info.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
+                ctypes.c_ulong,
+            ]
+            get_process_memory_info.restype = ctypes.c_int
+            process = get_current_process()
+            if get_process_memory_info(
+                process, ctypes.byref(counters), counters.cb
+            ):
+                return int(counters.WorkingSetSize)
+        except (AttributeError, OSError, TypeError, ValueError):
+            return 0
+        return 0
+
     try:
         for line in Path("/proc/self/status").read_text().splitlines():
             if line.startswith("VmRSS:"):
@@ -75,9 +121,10 @@ def _current_rss_bytes() -> int:
 class MemoryBudget:
     """Hard RSS guard for training experiments.
 
-    The limit is total process RSS, not an informal estimate of tensor sizes.
-    This turns a dangerous run into an actionable error before the host is
-    allowed to enter global OOM recovery.
+    The limit is total process resident memory: Windows WorkingSetSize or
+    Linux VmRSS, not an informal estimate of tensor sizes.  It does not
+    measure CUDA VRAM.  This turns a dangerous host-memory run into an
+    actionable error before the host is allowed to enter global OOM recovery.
     """
 
     def __init__(self, limit_mb: int) -> None:
@@ -283,8 +330,13 @@ def _encode_sample(
     sample: Dict[str, object],
     max_length: int,
     relation_space_count: int,
+    min_tokens: int,
 ) -> Dict[str, object]:
     tokens = list(sample["tokens"])
+    if len(tokens) < min_tokens:
+        raise ValueError(
+            f"sample has fewer than {min_tokens} content tokens: {sample['sample_id']}"
+        )
     if len(tokens) + 2 > max_length:
         raise ValueError(f"sample exceeds max_length: {sample['sample_id']}")
     required = set(tokens) | {str(sample["answer"])}
@@ -499,6 +551,8 @@ def _stage_train(
 def train(args: argparse.Namespace) -> Dict[str, object]:
     if min(args.ffn_epochs, args.route_epochs, args.qk_epochs) < 1:
         raise ValueError("all stage epoch counts must be positive")
+    if args.min_tokens < 1 or args.max_length < args.min_tokens + 2:
+        raise ValueError("max-length must leave room for min-tokens plus CLS/SEP")
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     torch.set_num_threads(args.threads)
@@ -526,7 +580,7 @@ def train(args: argparse.Namespace) -> Dict[str, object]:
     output.mkdir(parents=True, exist_ok=False)
 
     groups = list(load_groups(args.dataset))
-    validation_report = validate_groups(groups)
+    validation_report = validate_groups(groups, min_tokens=args.min_tokens)
     examples_by_split = {"train": [], "dev": [], "test": []}
     skipped = {"train": 0, "dev": 0, "test": 0}
     for group in groups:
@@ -538,6 +592,7 @@ def train(args: argparse.Namespace) -> Dict[str, object]:
                     sample,
                     args.max_length,
                     len(relation_triples),
+                    args.min_tokens,
                 )
             except ValueError as error:
                 if "no usable positive/negative positions" not in str(error):
@@ -636,6 +691,8 @@ def train(args: argparse.Namespace) -> Dict[str, object]:
         "relation_ffn_chunk_size": args.relation_ffn_chunk_size,
         "stages": ["ffn", "route", "qk"],
         "frozen_main_bert": True,
+        "max_length": args.max_length,
+        "min_tokens": args.min_tokens,
         "validation": validation_report,
         "skipped_no_negative": skipped,
         "counts": {split: len(rows) for split, rows in examples_by_split.items()},
@@ -659,7 +716,8 @@ def main() -> None:
     parser.add_argument("--base-checkpoint", default=str(DEFAULT_BASE_CHECKPOINT))
     parser.add_argument("--dataset", default=str(DEFAULT_DATASET))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
-    parser.add_argument("--max-length", type=int, default=128)
+    parser.add_argument("--max-length", type=int, default=DEFAULT_RELATION_MAX_LENGTH)
+    parser.add_argument("--min-tokens", type=int, default=DEFAULT_MIN_RELATION_TOKENS)
     parser.add_argument("--route-dim", type=int, default=32)
     parser.add_argument("--route-start-layer", type=int, default=1)
     parser.add_argument("--relation-ffn-hidden-size", type=int, default=32)

@@ -37,7 +37,7 @@ from .local_relation_adapter_model_v2 import (
 )
 from .model import BertConfig, _build_relative_position_bias
 from .tokenizer import SimpleBertTokenizer
-from .structured_relation import StructuredRelationScores
+from .structured_relation import StructuredRelationScores, ExtractiveRelationPointer
 
 
 Triple = Tuple[int, int, int]
@@ -47,6 +47,30 @@ DEFAULT_ROUTE_DIM = 32
 # Keep the temporary [B,H,T,T,C] Q/K block comfortably bounded when the
 # current shared bank uses up to 1500 relation candidates.
 DEFAULT_RELATION_SPACE_CHUNK_SIZE = 128
+
+
+class DimensionFusion(nn.Module):
+    """Dense cross-channel mixing for the fused dimensions (>= 1/3 of hidden size)."""
+    def __init__(self, hidden_size: int = 64, fusion_dim: int = 24):
+        super().__init__()
+        self.hidden_size = int(hidden_size)
+        self.fusion_dim = int(fusion_dim)
+        self.comb_dim = max(1, self.hidden_size - self.fusion_dim)
+        self.mixer = nn.Sequential(
+            nn.Linear(self.hidden_size, self.fusion_dim),
+            nn.GELU(),
+            nn.Linear(self.fusion_dim, self.fusion_dim),
+        )
+        nn.init.zeros_(self.mixer[-1].weight)
+        nn.init.zeros_(self.mixer[-1].bias)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if hidden_states.shape[-1] != self.hidden_size:
+            return hidden_states
+        comb = hidden_states[..., :self.comb_dim]
+        raw_fuse = hidden_states[..., self.comb_dim:]
+        fused = raw_fuse + self.mixer(hidden_states)
+        return torch.cat((comb, fused), dim=-1)
 
 
 class DynamicQKRelationBank(nn.Module):
@@ -59,6 +83,8 @@ class DynamicQKRelationBank(nn.Module):
         num_heads: int,
         route_dim: int,
         relation_space_chunk_size: int = DEFAULT_RELATION_SPACE_CHUNK_SIZE,
+        hidden_size: int = 64,
+        fusion_dim: Optional[int] = None,
     ):
         super().__init__()
         normalized = tuple(_normalize_triple(triple) for triple in relation_triples)
@@ -69,6 +95,9 @@ class DynamicQKRelationBank(nn.Module):
         self.space_dim = 3
         self.max_spaces = max(1, len(normalized))
         self.relation_space_chunk_size = int(relation_space_chunk_size)
+        actual_fusion_dim = int(fusion_dim) if fusion_dim is not None else max(1, int(round(hidden_size * 0.375)))
+        self.fusion_dim = actual_fusion_dim
+        self.dimension_fusion = DimensionFusion(hidden_size, actual_fusion_dim) if actual_fusion_dim > 0 else nn.Identity()
         if self.num_layers < 1 or self.num_heads < 1:
             raise ValueError("dynamic Q/K bank needs positive layer and head counts")
         if self.route_dim < 1:
@@ -140,6 +169,7 @@ class DynamicQKRelationBank(nn.Module):
                 "route_weights width must match the dynamic Q/K space count"
             )
 
+        hidden_states = self.dimension_fusion(hidden_states)
         batch_size, sequence_length, _ = hidden_states.shape
         scores = hidden_states.new_zeros(
             batch_size, self.num_heads, sequence_length, sequence_length
@@ -259,6 +289,7 @@ class DynamicQKRelationBilinearAdapter(ScaledLocalRelationBilinearAdapter):
         relation_score_scale: float = DEFAULT_RELATION_SCORE_SCALE,
         dynamic_qk_score_scale: float = DEFAULT_DYNAMIC_QK_SCORE_SCALE,
         initializer_range: float = 0.02,
+        fusion_dim: Optional[int] = None,
     ):
         super().__init__(
             relation_triples,
@@ -272,6 +303,8 @@ class DynamicQKRelationBilinearAdapter(ScaledLocalRelationBilinearAdapter):
             num_layers=num_layers,
             num_heads=num_heads,
             route_dim=route_dim,
+            hidden_size=hidden_size,
+            fusion_dim=fusion_dim,
         )
         self.router = ContextualRelationRouter(
             hidden_size,
@@ -475,6 +508,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
         relation_ffn_hidden_size: int = 0,
         relation_ffn_scale: float = 0.1,
         relation_ffn_chunk_size: int = 32,
+        fusion_dim: Optional[int] = None,
     ):
         relation_triples = list(relation_triples)
         super().__init__(
@@ -503,6 +537,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
             relation_score_scale=relation_score_scale,
             dynamic_qk_score_scale=dynamic_qk_score_scale,
             initializer_range=config.initializer_range,
+            fusion_dim=fusion_dim,
         )
         self.route_start_layer = int(route_start_layer)
         self.route_dim = int(route_dim)
@@ -511,6 +546,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
         self.relation_ffn_hidden_size = int(relation_ffn_hidden_size)
         self.relation_ffn_scale = float(relation_ffn_scale)
         self.relation_ffn_chunk_size = int(relation_ffn_chunk_size)
+        self.fusion_dim = getattr(self.relation_adapter.dynamic_qk, "fusion_dim", None)
         if self.relation_ffn_hidden_size:
             self.relation_adapter.dynamic_qk.structured_scores = StructuredRelationScores(
                 self.relation_ffn_hidden_size, self.relation_ffn_scale,
@@ -525,6 +561,40 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                 self.relation_adapter,
                 layer_index,
             )
+        self.pointer_head = ExtractiveRelationPointer(config.hidden_size)
+
+    def encode_hidden(
+        self,
+        input_ids: torch.LongTensor,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        relation_triples: Optional[Sequence[Sequence[int]]] = None,
+    ) -> torch.Tensor:
+        sequence_output, _, _ = self._encode_sequence(
+            input_ids,
+            token_type_ids,
+            attention_mask,
+            relation_triples=relation_triples,
+        )
+        return sequence_output
+
+    def pointer_scores(
+        self,
+        sequence_output: torch.Tensor,
+        mask_pos: int,
+        candidate_spans: Sequence[Tuple[int, int]],
+    ) -> torch.Tensor:
+        """Score candidate spans against the [MASK] contextual hidden state."""
+        h = sequence_output[0] if sequence_output.ndim == 3 else sequence_output
+        h_mask = h[mask_pos]
+        cand_reps = []
+        for start, end in candidate_spans:
+            span_h = h[start:end]
+            if span_h.shape[0] == 0:
+                span_h = h[start:start + 1]
+            cand_reps.append(span_h.mean(dim=0))
+        cand_reps_tensor = torch.stack(cand_reps, dim=0)
+        return self.pointer_head(h_mask, cand_reps_tensor)
 
     def _candidate_space_mask(
         self,
@@ -629,6 +699,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                     "relation_ffn_hidden_size": self.relation_ffn_hidden_size,
                     "relation_ffn_scale": self.relation_ffn_scale,
                     "relation_ffn_chunk_size": self.relation_ffn_chunk_size,
+                    "fusion_dim": self.fusion_dim,
                 },
                 handle,
                 ensure_ascii=False,
@@ -707,7 +778,13 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
             relation_ffn_hidden_size=int(dynamic_config.get("relation_ffn_hidden_size", 0)),
             relation_ffn_scale=float(dynamic_config.get("relation_ffn_scale", 0.1)),
             relation_ffn_chunk_size=int(dynamic_config.get("relation_ffn_chunk_size", 32)),
+            fusion_dim=dynamic_config.get("fusion_dim"),
         )
-        model.load_state_dict(state_dict, strict=True)
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+        for key in missing_keys:
+            if not key.startswith("pointer_head."):
+                raise RuntimeError(f"Missing key in state_dict: {key}")
+        if unexpected_keys:
+            raise RuntimeError(f"Unexpected keys in state_dict: {unexpected_keys}")
         model.lm_head.weight = model.bert.embeddings.word_embeddings.weight
         return model

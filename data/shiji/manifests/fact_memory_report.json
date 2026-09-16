@@ -1,137 +1,141 @@
 {
   "schema_version": 2,
-  "total_facts": 929,
+  "total_facts": 1287,
   "source_sentences_count": 10631,
-  "source_lines_used": 564,
-  "source_line_coverage_ratio": 0.05305239394224438,
-  "relation_fact_count": 523,
-  "relation_source_lines_used": 265,
-  "relation_source_coverage_ratio": 0.024927099990593546,
-  "relation_pair_count": 362,
+  "source_lines_used": 719,
+  "source_line_coverage_ratio": 0.06763239582353495,
+  "relation_fact_count": 924,
+  "relation_source_lines_used": 463,
+  "relation_source_coverage_ratio": 0.04355187658733892,
+  "relation_pair_count": 691,
   "relation_direction_distribution": {
-    "child_to_parent": 35,
-    "parent_to_child": 39,
-    "person_to_title": 196,
-    "title_to_person": 202,
-    "grandparent_to_grandchild": 6,
-    "grandchild_to_grandparent": 6,
-    "alias": 13,
+    "child_to_parent": 44,
+    "parent_to_child": 50,
+    "person_to_title": 365,
+    "title_to_person": 388,
+    "alias": 22,
+    "grandparent_to_grandchild": 7,
+    "grandchild_to_grandparent": 7,
     "uncle_to_nephew": 2,
-    "sibling_to_sibling": 17,
-    "nephew_to_uncle": 1,
-    "spouse_to_spouse": 4,
+    "spouse_to_spouse": 8,
+    "sibling_to_sibling": 27,
+    "nephew_to_uncle": 2,
     "ancestor_to_descendant": 1,
     "descendant_to_ancestor": 1
   },
   "relation_surface_distribution": {
-    "儿子": 43,
-    "父亲": 5,
-    "名叫": 10,
-    "title_name_apposition": 319,
-    "母亲": 5,
+    "儿子": 56,
+    "父亲": 7,
+    "名叫": 9,
+    "title_name_apposition": 668,
+    "母亲": 8,
     "自称": 1,
+    "号": 6,
     "本名": 2,
-    "孙子": 10,
+    "孙子": 12,
+    "起名叫": 4,
     "叫": 7,
     "被任用为": 2,
     "号称": 4,
-    "叔父": 3,
+    "叔父": 4,
+    "嫁给": 4,
     "妹妹": 3,
-    "弟弟": 14,
+    "娶": 4,
     "立为": 8,
+    "弟弟": 18,
     "长子": 7,
     "次子": 1,
     "三子": 1,
     "四子": 1,
     "子": 2,
-    "起名叫": 2,
     "字": 2,
     "任命为": 24,
     "拜为": 8,
     "玄孙": 2,
     "又称": 2,
-    "称为": 2,
-    "号": 4,
+    "称为": 6,
+    "被封为": 4,
     "封为": 8,
     "小儿子": 5,
+    "称": 6,
+    "兄弟": 2,
     "女儿": 4,
-    "嫁给": 2,
     "被拜为": 1,
-    "娶": 2,
     "被立为": 1,
-    "被封为": 2,
-    "祖先": 2,
-    "称": 2
+    "被任命为": 2,
+    "哥哥": 2,
+    "后母": 2,
+    "姐姐": 2,
+    "祖先": 2
   },
   "grammar_distribution": {
-    "KINSHIP": 112,
-    "TITLE_LINK": 398,
-    "CAMPAIGN": 111,
-    "COMBAT_OUTCOME": 92,
-    "CAUSATIVE": 110,
-    "ALIAS": 13,
+    "KINSHIP": 149,
+    "TITLE_LINK": 753,
+    "CAMPAIGN": 96,
+    "CAUSATIVE": 101,
+    "ALIAS": 22,
+    "COMBAT_OUTCOME": 65,
     "LOCATION_EVENT": 5,
-    "APPOINTMENT": 69,
-    "ORIGIN": 19
+    "APPOINTMENT": 67,
+    "ORIGIN": 29
   },
   "relation_type_distribution": {
-    "CHILD_OF": 35,
-    "PARENT_OF": 39,
-    "HAS_TITLE": 196,
-    "TITLE_OF": 202,
-    "CONQUER": 18,
-    "PUNISH": 14,
-    "DEFEAT": 56,
-    "ASSIGN": 110,
-    "KILL": 36,
-    "GRANDPARENT_OF": 6,
-    "GRANDCHILD_OF": 6,
-    "ALIAS_OF": 13,
+    "CHILD_OF": 44,
+    "PARENT_OF": 50,
+    "HAS_TITLE": 365,
+    "TITLE_OF": 388,
+    "PUNISH": 12,
+    "ASSIGN": 101,
+    "ATTACK": 74,
+    "ALIAS_OF": 22,
+    "KILL": 28,
+    "GRANDPARENT_OF": 7,
+    "GRANDCHILD_OF": 7,
     "EVENT_AT": 5,
-    "APPOINT": 69,
-    "ATTACK": 79,
+    "DEFEAT": 37,
+    "APPOINT": 67,
     "UNCLE_OR_AUNT_OF": 2,
-    "SIBLING_OF": 17,
-    "BORN_IN": 19,
-    "NEPHEW_OR_NIECE_OF": 1,
-    "SPOUSE_OF": 4,
+    "CONQUER": 10,
+    "SPOUSE_OF": 8,
+    "SIBLING_OF": 27,
+    "BORN_IN": 29,
+    "NEPHEW_OR_NIECE_OF": 2,
     "ANCESTOR_OF": 1,
     "DESCENDANT_OF": 1
   },
   "target_role_distribution": {
-    "object": 887,
+    "object": 1239,
     "role": 32,
-    "subject": 10
+    "subject": 16
   },
   "split_distribution": {
-    "test": 108,
-    "train": 735,
-    "dev": 86
+    "test": 135,
+    "train": 1027,
+    "dev": 125
   },
   "attribute_distribution": {
-    "('ENTITY', 'PERSON')": 515,
-    "('ENTITY', 'PERSON', 'TITLE')": 116,
-    "('ENTITY', 'GROUP')": 35,
-    "('ENTITY', 'TITLE')": 168,
-    "('ENTITY', 'PLACE')": 95
+    "('ENTITY', 'PERSON')": 723,
+    "('ENTITY', 'PERSON', 'TITLE')": 165,
+    "('ENTITY', 'GROUP')": 27,
+    "('ENTITY', 'TITLE')": 285,
+    "('ENTITY', 'PLACE')": 87
   },
   "variant_distribution": {
-    "0": 381,
-    "1": 548
+    "1": 1287
   },
   "distractor_distribution": {
-    "5": 929
+    "5": 1287
   },
-  "average_heuristic_confidence": 0.9581700753498386,
+  "average_heuristic_confidence": 0.9609168609168609,
   "quality_checks": {
-    "exact_one_base_mask": 929,
+    "exact_one_base_mask": 1287,
     "base_answer_leakage": 0,
-    "variant_count": 548,
+    "variant_count": 1287,
     "variant_answer_mismatch": 0,
     "variant_answer_leakage": 0
   },
   "rejected_candidates": {
-    "duplicate_fact": 12
+    "duplicate_fact": 17
   },
   "notes": [
     "confidence is a rule-based score, not a measured accuracy",
@@ -146,7 +150,7 @@
       "fact_group_id": "line_5_KINSHIP_12_15",
       "source_line": 5,
       "context": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
-      "long_context": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+      "long_context": "夏 本纪 禹因 治水 有功 ， 而 被 舜 选为 自己 的 接班人 。 后来 禹 死 后 ， 禹 子启继 承 了 父亲 的 职位 。 从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。",
       "masked_text": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 [MASK] 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
       "answer": "大禹",
       "target_role": "object",
@@ -183,7 +187,23 @@
         "楚庄王",
         "霍去病"
       ],
-      "variants": [],
+      "variants": [
+        {
+          "type": "long_context_masked",
+          "context": "夏 本纪 禹因 治水 有功 ， 而 被 舜 选为 自己 的 接班人 。 后来 禹 死 后 ， 禹 子启继 承 了 父亲 的 职位 。 从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。",
+          "masked_text": "夏 本纪 禹因 治水 有功 ， 而 被 舜 选为 自己 的 接班人 。 后来 禹 死 后 ， 禹 子启继 承 了 父亲 的 职位 。 从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 [MASK] 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。",
+          "answer": "大禹",
+          "target_role": "object",
+          "answer_attributes": [
+            "ENTITY",
+            "PERSON"
+          ],
+          "target_span": [
+            76,
+            77
+          ]
+        }
+      ],
       "split": "test",
       "relation_direction": "child_to_parent",
       "linked_entity": {
@@ -196,7 +216,7 @@
       "fact_group_id": "line_5_KINSHIP_12_15",
       "source_line": 5,
       "context": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
-      "long_context": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+      "long_context": "后来 禹 死 后 ， 禹 子启继 承 了 父亲 的 职位 。 从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。 九年 过去 了 ， 不但 不见 成效 ， 水灾 反而 越来越 严重 ， 河堤 不断 决口 ， 人民 的 生命财产 损失惨重 。",
       "masked_text": "夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 [MASK] 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。",
       "answer": "启",
       "target_role": "object",
@@ -236,8 +256,8 @@
       "variants": [
         {
           "type": "long_context_masked",
-          "context": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
-          "masked_text": "从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 [MASK] 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。",
+          "context": "后来 禹 死 后 ， 禹 子启继 承 了 父亲 的 职位 。 从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 启 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。 九年 过去 了 ， 不但 不见 成效 ， 水灾 反而 越来越 严重 ， 河堤 不断 决口 ， 人民 的 生命财产 损失惨重 。",
+          "masked_text": "后来 禹 死 后 ， 禹 子启继 承 了 父亲 的 职位 。 从此 ， 王位 世袭制 代替 了 禅让制 ， 出现 了 “ 天下为家 ” 的 局面 。 从 公元前 21 世纪 开始 ， 中国 进入 了 奴隶社会 ， 中国 历史 上 第一个 奴隶制 国家 夏朝 建立 了 。 夏朝 是 我国 第一个 世袭制 王朝 ， 由 著名 的 治水 英雄 大禹 的 儿子 [MASK] 建立 ， 建立 时间 大约 在 公元前 22 世纪末 至 公元前 21 世纪 初 ， 距今 约 四千 一百年 。 夏朝 灭亡 于 公元前 17 世纪 初 ， 共 存在 约 四百年 。 大禹 出世 尧 在位 后期 ， 洪水泛滥 ， 他 接受 一些 大臣 的 推荐 ， 任命 鲧 担任 治水 的 工作 。 九年 过去 了 ， 不但 不见 成效 ， 水灾 反而 越来越 严重 ， 河堤 不断 决口 ， 人民 的 生命财产 损失惨重 。",
           "answer": "启",
           "target_role": "object",
           "answer_attributes": [
@@ -245,8 +265,8 @@
             "PERSON"
           ],
           "target_span": [
-            52,
-            53
+            65,
+            66
           ]
         }
       ],
@@ -262,7 +282,7 @@
       "fact_group_id": "line_13_KINSHIP_0_2",
       "source_line": 13,
       "context": "禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。",
-      "long_context": "由于 鲧 的 态度顽固 ， 民愤 又 很大 ， 最后 舜 将 他 处死 。 当时 水患 仍然 很 严重 ， 舜 征求 一些 官员 的 意见 ， 看 谁 能 担任 这个 治水 的 工作 ， 大家 都 说 禹 最合适 。 禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。 有 一天 晚上 她 忽然 看到 一颗 流星 穿过 昴 星 ， 睡 了 以后 ， 在 梦 中 又 看到 了 这 一 情景 ， 于是 心中 产生 了 一种 特殊 的 反应 。 第二天 ， 她 吃 了 一颗 神珠 薏苡 ， 胸脯 突然 觉得 疼痛 ， 随即 裂开 了 ， 胸膛 里 有 个 小孩 ， 这个 小孩 就是 禹 。",
+      "long_context": "当时 水患 仍然 很 严重 ， 舜 征求 一些 官员 的 意见 ， 看 谁 能 担任 这个 治水 的 工作 ， 大家 都 说 禹 最合适 。 禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。 有 一天 晚上 她 忽然 看到 一颗 流星 穿过 昴 星 ， 睡 了 以后 ， 在 梦 中 又 看到 了 这 一 情景 ， 于是 心中 产生 了 一种 特殊 的 反应 。 第二天 ， 她 吃 了 一颗 神珠 薏苡 ， 胸脯 突然 觉得 疼痛 ， 随即 裂开 了 ， 胸膛 里 有 个 小孩 ， 这个 小孩 就是 禹 。",
       "masked_text": "禹 是 [MASK] 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。",
       "answer": "鲧",
       "target_role": "object",
@@ -299,7 +319,23 @@
         "勾践",
         "齐桓公"
       ],
-      "variants": [],
+      "variants": [
+        {
+          "type": "long_context_masked",
+          "context": "当时 水患 仍然 很 严重 ， 舜 征求 一些 官员 的 意见 ， 看 谁 能 担任 这个 治水 的 工作 ， 大家 都 说 禹 最合适 。 禹 是 鲧 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。 有 一天 晚上 她 忽然 看到 一颗 流星 穿过 昴 星 ， 睡 了 以后 ， 在 梦 中 又 看到 了 这 一 情景 ， 于是 心中 产生 了 一种 特殊 的 反应 。 第二天 ， 她 吃 了 一颗 神珠 薏苡 ， 胸脯 突然 觉得 疼痛 ， 随即 裂开 了 ， 胸膛 里 有 个 小孩 ， 这个 小孩 就是 禹 。",
+          "masked_text": "当时 水患 仍然 很 严重 ， 舜 征求 一些 官员 的 意见 ， 看 谁 能 担任 这个 治水 的 工作 ， 大家 都 说 禹 最合适 。 禹 是 [MASK] 的 儿子 ， 关于 他 的 诞生 ， 有 一些 神奇 的 传说 ： 禹 的 母亲 名叫 己 。 有 一天 晚上 她 忽然 看到 一颗 流星 穿过 昴 星 ， 睡 了 以后 ， 在 梦 中 又 看到 了 这 一 情景 ， 于是 心中 产生 了 一种 特殊 的 反应 。 第二天 ， 她 吃 了 一颗 神珠 薏苡 ， 胸脯 突然 觉得 疼痛 ， 随即 裂开 了 ， 胸膛 里 有 个 小孩 ， 这个 小孩 就是 禹 。",
+          "answer": "鲧",
+          "target_role": "object",
+          "answer_attributes": [
+            "ENTITY",
+            "PERSON"
+          ],
+          "target_span": [
+            30,
+            31
+          ]
+        }
+      ],
       "split": "train",
       "relation_direction": "child_to_parent",
       "linked_entity": {

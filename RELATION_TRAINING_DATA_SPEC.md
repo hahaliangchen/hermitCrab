@@ -5,6 +5,10 @@
 架构基线固定为 `[q,k,|q-k|,vec(q⊗k)]` 共 **18 维**，共享 FFN 为 **18→32→1**。
 数据无需生成三维坐标、attention、因果贡献或“模型改对原因”；这些必须由真实运行产生。
 
+当前默认长度策略为 `max_length=256`（包含 `[CLS]`、`[SEP]`）和
+`min_tokens=12`（不含特殊 token）。长度不足的短句不能作为关系监督样本；超长样本必须
+保留完整句/分句上下文或被拒绝，不能静默截断。
+
 ## 1. 交付格式
 
 - UTF-8 JSONL，一行一个完整对照组；不输出 Markdown 围栏、注释或省略号。
@@ -48,7 +52,8 @@
 - `fact_id`：引用本组事实。
 - `tokens`：已经分词的字符串数组，恰好一个 `[MASK]`，无需 CLS/SEP/PAD。
   人名、职位等答案必须完整作为一个 token；目前 MLM 一次预测一个 token。
-  生成器必须同时对基础样本和所有变体检查 `len(tokens)+2 <= max_length`（预留 CLS/SEP），
+  生成器必须同时对基础样本和所有变体检查 `min_tokens <= len(tokens)` 且
+  `len(tokens)+2 <= max_length`（预留 CLS/SEP），
   超长组应过滤或按保留 MASK、谓词和必要角色的规则裁剪，不能交给训练入口才失败。
 - `answer`：与该事实 `roles[target_slot]` 完全一致的一个 token。
 - `target_slot`：本次提问的角色，例如 title 或 recipient。
@@ -70,6 +75,8 @@
 
 对照字段：`a`、`b` 为本组 sample_id，`kind` 为 invariance 或 contrast，
 `changed_slots` 为变化字段路径列表（背景/同义改写的不变性对照用空列表）。
+这里的 `pairs` 只是样本级的不变性/对比监督；它不是 token 两两组合的关系空间，
+训练入口也不会据此为词对注册候选关系。
 允许 `relation_type`、`roles.<角色名>`、`qualifiers.time|place|condition|stage`、`target_slot`。
 例如 `["roles.recipient"]` 或 `["qualifiers.time"]`；改变提问目标时包含 `target_slot`。
 标注被主动改变的条件，不必重复列出随之变化的答案角色；每条路径必须实际发生变化。
@@ -128,9 +135,9 @@ target_slot、gold role_spans 或来源引文编码成候选空间以泄露答�
     {"fact_id": "syn-f2", "relation_type": "APPOINT", "roles": {"actor": "青王", "predicate": "封", "recipient": "陆衡", "title": "西侯"}, "qualifiers": {}, "evidence": {"kind": "synthetic", "source_id": "synthetic-story-001", "quote": "虚构故事：林舟与陆衡归来后，青王封林舟为东侯，封陆衡为西侯。"}}
   ],
   "samples": [
-    {"sample_id": "syn-s1", "fact_id": "syn-f1", "tokens": ["青王", "封", "林舟", "为", "[MASK]", "。"], "answer": "东侯", "target_slot": "title", "surface_kind": "synthetic", "role_spans": {"actor": [0,1], "predicate": [1,2], "recipient": [2,3]}, "background_spans": [], "hard_negatives": ["西侯"], "negative_reasons": {"西侯":"该职位属于陆衡，当前被任命者为林舟"}},
-    {"sample_id": "syn-s2", "fact_id": "syn-f1", "tokens": ["林舟", "与", "陆衡", "归来", "后", "，", "青王", "封", "林舟", "为", "[MASK]", "。"], "answer": "东侯", "target_slot": "title", "surface_kind": "adversarial", "role_spans": {"actor": [6,7], "predicate": [7,8], "recipient": [8,9]}, "background_spans": [[0,6]], "hard_negatives": ["西侯"], "negative_reasons": {"西侯":"陆衡是干扰实体，任命对象仍为林舟"}},
-    {"sample_id": "syn-s3", "fact_id": "syn-f2", "tokens": ["青王", "封", "陆衡", "为", "[MASK]", "。"], "answer": "西侯", "target_slot": "title", "surface_kind": "synthetic", "role_spans": {"actor": [0,1], "predicate": [1,2], "recipient": [2,3]}, "background_spans": [], "hard_negatives": ["东侯"], "negative_reasons": {"东侯":"该职位属于林舟，当前被任命者为陆衡"}}
+    {"sample_id": "syn-s1", "fact_id": "syn-f1", "tokens": ["林舟", "与", "陆衡", "一同", "归来", "后", "，", "青王", "封", "林舟", "为", "[MASK]", "。"], "answer": "东侯", "target_slot": "title", "surface_kind": "synthetic", "role_spans": {"actor": [7,8], "predicate": [8,9], "recipient": [9,10]}, "background_spans": [[0,7]], "hard_negatives": ["西侯"], "negative_reasons": {"西侯":"该职位属于陆衡，当前被任命者为林舟"}},
+    {"sample_id": "syn-s2", "fact_id": "syn-f1", "tokens": ["陆衡", "陪同", "林舟", "归来", "之后", "，", "青王", "封", "林舟", "为", "[MASK]", "。"], "answer": "东侯", "target_slot": "title", "surface_kind": "adversarial", "role_spans": {"actor": [6,7], "predicate": [7,8], "recipient": [8,9]}, "background_spans": [[0,6]], "hard_negatives": ["西侯"], "negative_reasons": {"西侯":"陆衡是干扰实体，任命对象仍为林舟"}},
+    {"sample_id": "syn-s3", "fact_id": "syn-f2", "tokens": ["林舟", "与", "陆衡", "归来", "后", "，", "青王", "封", "陆衡", "为", "[MASK]", "。"], "answer": "西侯", "target_slot": "title", "surface_kind": "synthetic", "role_spans": {"actor": [6,7], "predicate": [7,8], "recipient": [8,9]}, "background_spans": [[0,6]], "hard_negatives": ["东侯"], "negative_reasons": {"东侯":"该职位属于林舟，当前被任命者为陆衡"}}
   ],
   "pairs": [
     {"a": "syn-s1", "b": "syn-s2", "kind": "invariance", "changed_slots": []},
@@ -156,6 +163,7 @@ margin 为 2.0；负例字符串映射为词表 ID，绝不限制推理候选词
 新入口默认随机初始化，64 hidden、2 层、4 heads、4 个共享三维空间；所有输入采用同一
 小型候选 bank，上下文路由学习权重。不会读取答案构造 token pair，不根据 gold 角色标签
 分配空间。训练、评估、`examples/predict_relation_pairs.py` 共用 visible_inputs。
+默认长度为 256（含 `[CLS]`、`[SEP]`），至少需要 12 个内容 token；生产数据中的短句不进入训练。
 词表仅由 train 样本的可见 tokens、答案及负例构建，不读取 dev/test 或证据原文扩展词表。
 训练 OOV 拒绝；评估答案 OOV 计为答错并单独报告，输入 OOV 映射 UNK 并报告数量。
 超过 max_length 的样本拒绝，不静默裁掉关键角色。默认每 100 个组更新抽样一次纠错，

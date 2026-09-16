@@ -9,6 +9,8 @@
 动态事实模型可设置 `relation_ffn_hidden_size=32` 开启共享的 18→32→1 FFN。
 默认关闭以兼容旧模型；新 JSONL 请用 `examples/train_relation_pairs.py`，包含全词表 CE、
 负例 margin、不变性对称 KL，以及抽样纠错回退。训练与答题共用不读取答案的候选策略。
+当前关系训练默认使用 `max_length=256`（含 `[CLS]`/`[SEP]`）和至少 12 个内容 token；
+超长或过短样本直接拒绝，不静默截断，也不为 token 两两组合分配关系空间。
 `examples/train_shiji_structured_relation.py` 保留为旧 manifest 对照，其答案条件候选不能
 用于证明未知答案泛化。尚无真实数据泛化效果结论。
 

@@ -48,6 +48,7 @@ DEFAULT_OUTPUT_DIR = os.path.abspath(
     )
 )
 DYNAMIC_CONFIG_NAME = "dynamic_model_config.json"
+DEFAULT_MAX_LENGTH = 256
 
 
 class ContextSpaceRegistry:
@@ -1431,7 +1432,7 @@ def train(
     training_file: str = DEFAULT_DATA_PATH,
     output_dir: str = DEFAULT_OUTPUT_DIR,
     max_sentences: int = 100,
-    max_length: int = 128,
+    max_length: int = DEFAULT_MAX_LENGTH,
     hidden_size: int = 256,
     num_hidden_layers: int = 4,
     num_attention_heads: int = 4,
@@ -1537,7 +1538,7 @@ def train(
                 text,
                 add_special_tokens=True,
                 max_length=max_length,
-                truncation=True,
+                truncation=False,
                 padding=False,
                 return_special_tokens_mask=True,
             )
@@ -1751,7 +1752,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("data_path", nargs="?", default=DEFAULT_DATA_PATH)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-sentences", type=int, default=100)
-    parser.add_argument("--max-length", type=int, default=128)
+    parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
     parser.add_argument("--hidden-size", type=int, default=256)
     parser.add_argument("--layers", type=int, default=4)
     parser.add_argument("--heads", type=int, default=4)

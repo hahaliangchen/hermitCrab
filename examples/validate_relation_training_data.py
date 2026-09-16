@@ -6,6 +6,10 @@ import json
 import unicodedata
 
 
+DEFAULT_MIN_RELATION_TOKENS = 12
+DEFAULT_RELATION_MAX_LENGTH = 256
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -35,7 +39,9 @@ def changed_value(path, sample, fact, version):
     return fact.get(prefix, {}).get(key)
 
 
-def validate_groups(groups, vocabulary=None):
+def validate_groups(groups, vocabulary=None, min_tokens=0):
+    if min_tokens < 0:
+        raise ValueError("min_tokens must be nonnegative")
     seen_groups, seen_samples = set(), set()
     source_splits, fact_records, text_splits, semantic_splits, evidence_splits = {}, {}, {}, {}, {}
     counts = Counter()
@@ -98,6 +104,7 @@ def validate_groups(groups, vocabulary=None):
             tokens, answer = sample["tokens"], sample["answer"]
             require(isinstance(tokens, list) and all(token(t) for t in tokens), f"{sid}: invalid tokens")
             require(tokens.count("[MASK]") == 1, f"{sid}: exactly one MASK required")
+            require(len(tokens) >= min_tokens, f"{sid}: requires at least {min_tokens} content tokens")
             require(not set(tokens) & {"[CLS]", "[SEP]", "[PAD]", "[UNK]"}, f"{sid}: special tokens supplied")
             require(token(answer) and answer not in tokens and not answer.startswith("["), f"{sid}: answer invalid/leaked")
             require(sample["target_slot"] in roles and roles[sample["target_slot"]] == answer, f"{sid}: answer does not match fact slot")
@@ -191,12 +198,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path")
     parser.add_argument("--vocab", help="optional tokenizer vocab.json; reject OOV tokens/labels/negatives")
+    parser.add_argument(
+        "--min-tokens",
+        type=int,
+        default=DEFAULT_MIN_RELATION_TOKENS,
+        help="minimum content tokens per sample (use 0 for legacy validation)",
+    )
     args = parser.parse_args()
     try:
         vocabulary = None
         if args.vocab:
             with open(args.vocab, encoding="utf-8") as stream:
                 vocabulary = json.load(stream)
-        print(json.dumps(validate_groups(load_groups(args.path), vocabulary), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                validate_groups(load_groups(args.path), vocabulary, args.min_tokens),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     except (ValueError, KeyError, TypeError) as error:
         parser.exit(1, f"INVALID: {error}\n")

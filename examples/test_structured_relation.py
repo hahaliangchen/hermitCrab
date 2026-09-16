@@ -9,6 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "examples"))
 import torch
 
 from bert_simple.dynamic_qk_model import (
@@ -320,7 +321,7 @@ class RelationTests(unittest.TestCase):
 
 class DataSpecTests(unittest.TestCase):
     def example(self):
-        doc = (ROOT / "RELATION_TRAINING_DATA_SPEC.md").read_text()
+        doc = (ROOT / "RELATION_TRAINING_DATA_SPEC.md").read_text(encoding="utf-8")
         return json.loads(doc.split("```json\n", 1)[1].split("```", 1)[0])
 
     def test_published_example_and_rejections(self):
@@ -331,7 +332,7 @@ class DataSpecTests(unittest.TestCase):
             if mutation == "leak":
                 bad["samples"][0]["tokens"].append("东侯")
             elif mutation == "span":
-                bad["samples"][0]["background_spans"] = [[0, 2]]
+                bad["samples"][0]["background_spans"] = [[7, 9]]
             elif mutation == "answer":
                 bad["samples"][0]["answer"] = "西侯"
             else:

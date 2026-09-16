@@ -37,14 +37,19 @@ class SimpleBertTokenizer:
         self.cls_token = "[CLS]"
         self.sep_token = "[SEP]"
         self.mask_token = "[MASK]"
+        self.ent_token = "[ENT]"
 
         self.token_to_id: Dict[str, int] = {}
         self.id_to_token: List[str] = []
         # initialize with specials in fixed order
-        for tok in [self.pad_token, self.unk_token, self.cls_token, self.sep_token, self.mask_token]:
+        for tok in [self.pad_token, self.unk_token, self.cls_token, self.sep_token, self.mask_token, self.ent_token]:
             self._add_token(tok)
 
     # --- Special token ids ---
+    @property
+    def ent_token_id(self) -> int:
+        return self.token_to_id[self.ent_token]
+
     @property
     def pad_token_id(self) -> int:
         return self.token_to_id[self.pad_token]

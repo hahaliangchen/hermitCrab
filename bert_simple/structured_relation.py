@@ -15,19 +15,90 @@ import torch
 from torch import nn
 
 
+class ErrorComponentEraser(nn.Module):
+    """Maintains a memory of error/distractor directions and orthogonally subtracts them."""
+
+    def __init__(self, hidden_size: int = 32, num_slots: int = 8):
+        super().__init__()
+        self.hidden_size = int(hidden_size)
+        self.num_slots = int(num_slots)
+        self.register_buffer("error_directions", torch.zeros(self.num_slots, self.hidden_size))
+        self.register_buffer("slot_active", torch.zeros(self.num_slots, dtype=torch.bool))
+        self.register_buffer("ptr", torch.zeros(1, dtype=torch.long))
+
+    def record_diff(self, h_err: torch.Tensor, h_true: torch.Tensor):
+        """Record the unit direction from true target to error/distractor."""
+        with torch.no_grad():
+            diff = (h_err - h_true).detach().view(-1, self.hidden_size)
+            if diff.numel() == 0:
+                return
+            mean_diff = diff.mean(dim=0)
+            norm = mean_diff.norm().clamp_min(1e-6)
+            unit_dir = mean_diff / norm
+            idx = int(self.ptr.item())
+            self.error_directions[idx] = unit_dir
+            self.slot_active[idx] = True
+            self.ptr[0] = (idx + 1) % self.num_slots
+
+    def eliminate(self, h: torch.Tensor) -> torch.Tensor:
+        """Orthogonal component subtraction: h_clean = h - sum_k (h . d_k) * d_k."""
+        active = self.error_directions[self.slot_active]
+        if active.shape[0] == 0:
+            return h
+        proj_coeffs = torch.matmul(h, active.t())
+        proj = torch.matmul(proj_coeffs, active)
+        return h - proj
+
+
+class ExtractiveRelationPointer(nn.Module):
+    """Difference-aware pointer network comparing candidate span representations against [MASK]."""
+
+    def __init__(self, hidden_size: int = 64):
+        super().__init__()
+        self.hidden_size = int(hidden_size)
+        self.comparator = nn.Sequential(
+            nn.Linear(4 * self.hidden_size, self.hidden_size),
+            nn.GELU(),
+            nn.Linear(self.hidden_size, 1),
+        )
+        nn.init.normal_(self.comparator[0].weight, std=0.02)
+        nn.init.zeros_(self.comparator[0].bias)
+        nn.init.zeros_(self.comparator[2].weight)
+        nn.init.zeros_(self.comparator[2].bias)
+
+    def forward(self, h_mask: torch.Tensor, cand_reps: torch.Tensor) -> torch.Tensor:
+        """
+        h_mask: [..., hidden_size]
+        cand_reps: [..., num_cands, hidden_size]
+        Returns: [..., num_cands]
+        """
+        if h_mask.ndim == cand_reps.ndim - 1:
+            h_mask_expanded = h_mask.unsqueeze(-2).expand_as(cand_reps)
+        else:
+            h_mask_expanded = h_mask
+        diff = (h_mask_expanded - cand_reps).abs()
+        prod = h_mask_expanded * cand_reps
+        feats = torch.cat([h_mask_expanded, cand_reps, diff, prod], dim=-1)
+        return self.comparator(feats).squeeze(-1)
+
+
 class Structured3DRelationFFN(nn.Module):
-    MAX_PAIR_BLOCK_ELEMENTS = 4096
+    MAX_PAIR_BLOCK_ELEMENTS = 65536
 
     def __init__(self, hidden_size=32):
         super().__init__()
         if hidden_size < 1:
             raise ValueError("hidden_size must be positive")
-        self.network = nn.Sequential(
-            nn.Linear(18, hidden_size), nn.GELU(), nn.Linear(hidden_size, 1)
-        )
-        # Preserve the baseline on insertion; the output layer learns first.
-        nn.init.zeros_(self.network[-1].weight)
-        nn.init.zeros_(self.network[-1].bias)
+        self.fc1 = nn.Linear(18, hidden_size)
+        self.act = nn.GELU()
+        self.eraser = ErrorComponentEraser(hidden_size)
+        self.fc2 = nn.Linear(hidden_size, 1)
+        nn.init.zeros_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+
+    @property
+    def network(self):
+        return nn.Sequential(self.fc1, self.act, self.fc2)
 
     @staticmethod
     def features(q, k):
@@ -38,15 +109,14 @@ class Structured3DRelationFFN(nn.Module):
                 "q and k must have the same shape; use forward_pairwise for "
                 "different query/key lengths"
             )
-        # The final two dimensions are a small 3x3 matrix product.  The
-        # caller is responsible for aligning the pair dimensions in bounded
-        # blocks; this helper no longer silently broadcasts an arbitrary
-        # query-by-key grid.
         outer = torch.matmul(q.unsqueeze(-1), k.unsqueeze(-2)).flatten(-2)
         return torch.cat((q, k, (q - k).abs(), outer), dim=-1)
 
     def forward(self, q, k):
-        return self.network(self.features(q, k)).squeeze(-1)
+        feat = self.features(q, k)
+        h = self.act(self.fc1(feat))
+        h_clean = self.eraser.eliminate(h)
+        return self.fc2(h_clean).squeeze(-1)
 
     def forward_pairwise(
         self,

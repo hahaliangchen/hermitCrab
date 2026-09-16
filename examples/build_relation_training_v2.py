@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import unicodedata
 
-from validate_relation_training_data import validate_groups
+from validate_relation_training_data import (
+    DEFAULT_MIN_RELATION_TOKENS,
+    DEFAULT_RELATION_MAX_LENGTH,
+    validate_groups,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,9 +170,11 @@ def _hard_negatives(row: Dict[str, object], answer: str, target_slot: str):
     return values, reasons
 
 
-def _fits_max_length(tokens: Sequence[str], max_length: int) -> bool:
-    """Check the length consumed by the training input, including CLS/SEP."""
-    return len(tokens) + 2 <= max_length
+def _fits_max_length(
+    tokens: Sequence[str], max_length: int, min_tokens: int = 0
+) -> bool:
+    """Check content bounds and the length consumed by CLS/SEP."""
+    return min_tokens <= len(tokens) and len(tokens) + 2 <= max_length
 
 
 def _sentence_segments(tokens: Sequence[str]) -> List[Tuple[int, int]]:
@@ -225,7 +231,13 @@ def _meaningful_background(
     )
 
 
-def _source_context_variant(text: str, row: Dict[str, object], max_length: int):
+def _source_context_variant(
+    text: str,
+    row: Dict[str, object],
+    max_length: int,
+    min_tokens: int = 0,
+    excluded_texts: Sequence[str] = (),
+):
     """Find the largest fitting window made of complete source segments."""
     base_tokens = text.split()
     mask_index = base_tokens.index("[MASK]")
@@ -233,6 +245,7 @@ def _source_context_variant(text: str, row: Dict[str, object], max_length: int):
     restored[mask_index] = str(row["answer"])
     long_tokens = str(row["long_context"]).split()
     segments = _sentence_segments(long_tokens)
+    excluded = {str(value) for value in excluded_texts}
     if not segments:
         return None
 
@@ -253,7 +266,7 @@ def _source_context_variant(text: str, row: Dict[str, object], max_length: int):
                 candidate_start = segments[left_segment][0]
                 candidate_end = segments[right_segment][1]
                 candidate = long_tokens[candidate_start:candidate_end]
-                if not _fits_max_length(candidate, max_length):
+                if not _fits_max_length(candidate, max_length, min_tokens):
                     continue
                 local_mask = start - candidate_start + mask_index
                 if local_mask < 0 or local_mask >= len(candidate):
@@ -265,6 +278,9 @@ def _source_context_variant(text: str, row: Dict[str, object], max_length: int):
                 ):
                     continue
                 candidate[local_mask] = "[MASK]"
+                candidate_text = " ".join(candidate)
+                if candidate_text in excluded:
+                    continue
                 if not _meaningful_background(candidate, base_tokens):
                     continue
                 candidates.append((len(candidate), right_segment - left_segment, candidate))
@@ -276,8 +292,15 @@ def _source_context_variant(text: str, row: Dict[str, object], max_length: int):
     return " ".join(candidate), _background_spans(candidate, base_tokens)
 
 
-def _surface_variant(text: str, row: Dict[str, object], max_length: int):
+def _surface_variant(
+    text: str,
+    row: Dict[str, object],
+    max_length: int,
+    min_tokens: int = 0,
+    excluded_texts: Sequence[str] = (),
+):
     base_tokens = text.split()
+    excluded = {str(value) for value in excluded_texts}
     for variant in row.get("variants", []) or []:
         candidate = str(variant.get("masked_text", ""))
         candidate_tokens = candidate.split()
@@ -285,12 +308,15 @@ def _surface_variant(text: str, row: Dict[str, object], max_length: int):
             candidate
             and candidate != text
             and candidate_tokens.count("[MASK]") == 1
-            and _fits_max_length(candidate_tokens, max_length)
+            and candidate not in excluded
+            and _fits_max_length(candidate_tokens, max_length, min_tokens)
             and _meaningful_background(candidate_tokens, base_tokens)
         ):
             return candidate, "source", "existing_variant", _background_spans(candidate_tokens, base_tokens)
 
-    source_variant = _source_context_variant(text, row, max_length)
+    source_variant = _source_context_variant(
+        text, row, max_length, min_tokens, excluded_texts=excluded
+    )
     if source_variant is not None:
         candidate, background_spans = source_variant
         return candidate, "source", "context_window", background_spans
@@ -298,7 +324,10 @@ def _surface_variant(text: str, row: Dict[str, object], max_length: int):
     for old, new in PUNCTUATION_VARIANTS:
         if old in text:
             candidate = text.replace(old, new, 1)
-            if _fits_max_length(candidate.split(), max_length):
+            if (
+                candidate not in excluded
+                and _fits_max_length(candidate.split(), max_length, min_tokens)
+            ):
                 return candidate, "paraphrase", "punctuation_variant", []
     raise ValueError(f"{row['fact_id']}: could not make a distinct source variant")
 
@@ -451,7 +480,12 @@ def build(
     rows: Sequence[Dict[str, object]],
     max_length: int,
     source_lines: Optional[Dict[int, str]] = None,
+    min_tokens: int = DEFAULT_MIN_RELATION_TOKENS,
 ):
+    if min_tokens < 1:
+        raise ValueError("min_tokens must be positive")
+    if max_length < min_tokens + 2:
+        raise ValueError("max_length must leave room for min_tokens plus CLS/SEP")
     if source_lines is None:
         source_lines = _load_source_lines(DEFAULT_SOURCE_TEXT)
     grouped = defaultdict(list)
@@ -524,19 +558,35 @@ def build(
             facts.append(_fact_entry(row, metadata))
             base_id = f"{row['fact_id']}:base"
             variant_id = f"{row['fact_id']}:variant"
+            original_text = str(row["masked_text"])
+            base_text = original_text
+            base_background_spans = []
+            expanded = _source_context_variant(
+                original_text, row, max_length, min_tokens
+            )
+            if expanded is not None and len(expanded[0].split()) > len(original_text.split()):
+                base_text, base_background_spans = expanded
+            if not _fits_max_length(base_text.split(), max_length, min_tokens):
+                skipped["min_length_exceeded"] += 1
+                variant_failed = True
+                break
             base_sample = _sample(
-                row, metadata, str(row["masked_text"]), "source", base_id
+                row, metadata, base_text, "source", base_id, base_background_spans
             )
             try:
                 variant_text, variant_kind, variant_origin, background_spans = _surface_variant(
-                    str(row["masked_text"]), row, max_length
+                    original_text,
+                    row,
+                    max_length,
+                    min_tokens,
+                    excluded_texts=(base_text,),
                 )
             except ValueError:
                 skipped["no_valid_variant"] += 1
                 variant_failed = True
                 break
-            if not _fits_max_length(variant_text.split(), max_length):
-                skipped["max_length_exceeded"] += 1
+            if not _fits_max_length(variant_text.split(), max_length, min_tokens):
+                skipped["min_length_exceeded"] += 1
                 variant_failed = True
                 break
             variant_sample = _sample(
@@ -595,6 +645,7 @@ def _report(
     source_path: Path,
     source_text_path: Path,
     max_length: int,
+    min_tokens: int,
     validation,
 ):
     relation_counts = Counter()
@@ -612,6 +663,7 @@ def _report(
         "source_manifest": str(source_path),
         "source_text": str(source_text_path),
         "max_length": max_length,
+        "min_tokens": min_tokens,
         "groups": len(groups),
         "facts": sum(len(group["facts"]) for group in groups),
         "samples": sum(len(group["samples"]) for group in groups),
@@ -636,22 +688,34 @@ def main() -> None:
     parser.add_argument("--source-text", type=Path, default=DEFAULT_SOURCE_TEXT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--max-length", type=int, default=128)
+    parser.add_argument("--max-length", type=int, default=DEFAULT_RELATION_MAX_LENGTH)
+    parser.add_argument("--min-tokens", type=int, default=DEFAULT_MIN_RELATION_TOKENS)
     args = parser.parse_args()
-    if args.max_length < 3:
-        raise ValueError("max-length must be at least 3")
+    if args.min_tokens < 1:
+        raise ValueError("min-tokens must be positive")
+    if args.max_length < args.min_tokens + 2:
+        raise ValueError("max-length must leave room for min-tokens plus CLS/SEP")
 
     rows = _load_rows(args.input)
     source_lines = _load_source_lines(args.source_text)
-    groups, skipped, variant_counts = build(rows, args.max_length, source_lines)
-    validation = validate_groups(groups)
+    groups, skipped, variant_counts = build(
+        rows, args.max_length, source_lines, args.min_tokens
+    )
+    validation = validate_groups(groups, min_tokens=args.min_tokens)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         "".join(json.dumps(group, ensure_ascii=False, separators=(",", ":")) + "\n" for group in groups),
         encoding="utf-8",
     )
     report = _report(
-        groups, skipped, variant_counts, args.input, args.source_text, args.max_length, validation
+        groups,
+        skipped,
+        variant_counts,
+        args.input,
+        args.source_text,
+        args.max_length,
+        args.min_tokens,
+        validation,
     )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "examples"))
 import torch
 from bert_simple.dynamic_qk_model import DynamicQKLocalRelationMarginBertForMaskedLM
 from bert_simple.relation_pair_training import (
@@ -21,7 +22,7 @@ from train_relation_pairs import train, parser
 
 
 def example():
-    text = (ROOT / "RELATION_TRAINING_DATA_SPEC.md").read_text()
+    text = (ROOT / "RELATION_TRAINING_DATA_SPEC.md").read_text(encoding="utf-8")
     return json.loads(text.split("```json\n", 1)[1].split("```", 1)[0])
 
 
@@ -217,10 +218,11 @@ class PairTrainingTests(unittest.TestCase):
             dataset.write_text(json.dumps(self.group, ensure_ascii=False) + "\n", encoding="utf-8")
             output = root / "run"
             args = parser().parse_args([str(dataset), "--output-dir", str(output), "--epochs", "2",
-                                       "--hidden-size", "12", "--spaces", "2", "--probe-every", "1"])
+                                       "--hidden-size", "12", "--spaces", "2",
+                                       "--probe-every", "1"])
             metrics = train(args)
             self.assertEqual(metrics["train"]["samples"], 3)
-            records = [json.loads(line) for line in (output / "training_log.jsonl").read_text().splitlines()]
+            records = [json.loads(line) for line in (output / "training_log.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(records), 2)
             self.assertTrue(all("correction_probe" in record for record in records))
             restored = DynamicQKLocalRelationMarginBertForMaskedLM.from_pretrained(str(output)).eval()
