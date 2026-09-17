@@ -291,11 +291,29 @@ class GrammarAttributeFilter(nn.Module):
             raise ValueError("attribute vocabulary does not match this filter")
         tokenizer = SimpleBertTokenizer.from_pretrained(str(path))
         model = cls(tokenizer, int(config.get("attribute_dim", len(ATTRIBUTES))))
-        model.load_state_dict(
-            torch.load(
-                path / "grammar_attribute.pt",
-                map_location="cpu",
-                weights_only=True,
+        weights_path = path / "grammar_attribute.pt"
+        summary_path = path / "word_attributes_summary.json"
+        if weights_path.exists():
+            model.load_state_dict(
+                torch.load(
+                    weights_path,
+                    map_location="cpu",
+                    weights_only=True,
+                )
             )
-        )
+        elif summary_path.exists():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            with torch.no_grad():
+                model.word_attributes.word_attribute_logits.fill_(-5.0)
+                known_ids = []
+                for token, attrs in summary.items():
+                    if token in tokenizer.token_to_id:
+                        tid = tokenizer.token_to_id[token]
+                        known_ids.append(tid)
+                        for attr in attrs:
+                            if attr in ATTRIBUTES:
+                                aidx = ATTRIBUTES.index(attr)
+                                model.word_attributes.word_attribute_logits[tid, aidx] = 5.0
+                model.mark_known(known_ids)
         return model
+

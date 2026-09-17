@@ -183,11 +183,13 @@ class BertAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         route_weights: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         self_out, attn_probs = self.self_attn(
             hidden_states,
             attention_mask,
             route_weights=route_weights,
+            **kwargs,
         )
         hidden_states = self.dropout(self_out) + hidden_states
         hidden_states = self.LayerNorm(hidden_states)
@@ -231,12 +233,14 @@ class BertLayer(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         route_weights: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         attn_output, attn_probs = self.attention(
             hidden_states,
             attention_mask,
             output_attentions=output_attentions,
             route_weights=route_weights,
+            **kwargs,
         )
         inter = self.intermediate(attn_output)
         layer_output = self.output(inter, attn_output)
@@ -248,10 +252,21 @@ class BertEncoder(nn.Module):
         super().__init__()
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
 
-    def forward(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None, output_attentions: bool = False) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+        **kwargs,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
         all_attentions = () if output_attentions else None
         for layer_module in self.layer:
-            hidden_states, layer_attn = layer_module(hidden_states, attention_mask, output_attentions=output_attentions)
+            hidden_states, layer_attn = layer_module(
+                hidden_states,
+                attention_mask,
+                output_attentions=output_attentions,
+                **kwargs,
+            )
             if output_attentions:
                 all_attentions = all_attentions + (layer_attn,)
         return hidden_states, all_attentions

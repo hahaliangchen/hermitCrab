@@ -1,62 +1,70 @@
 {
   "schema_version": 2,
   "status": "draft_from_existing_fact_manifest_requires_manual_audit",
-  "source_manifest": "D:\\project\\bert-simple\\data\\shiji\\manifests\\fact_memory_dataset.json",
-  "source_text": "D:\\project\\bert-simple\\data\\shiji\\sentences\\shiji_sentences.txt",
+  "source_manifest": "/home/goodtime/Documents/project/hermitCrab/data/shiji/manifests/fact_memory_dataset.json",
+  "source_text": "/home/goodtime/Documents/project/hermitCrab/data/shiji/sentences/shiji_sentences.txt",
   "max_length": 256,
-  "min_tokens": 100,
-  "groups": 196,
-  "facts": 392,
-  "samples": 784,
+  "min_tokens": 12,
+  "groups": 178,
+  "facts": 356,
+  "samples": 712,
   "split_groups": {
-    "dev": 11,
-    "test": 13,
-    "train": 172
+    "dev": 7,
+    "test": 14,
+    "train": 157
   },
   "relation_type_fact_counts": {
     "ALIAS_OF": 8,
-    "APPOINT": 14,
-    "BORN_IN": 4,
-    "CHILD_OF": 10,
-    "GRANDCHILD_OF": 2,
-    "GRANDPARENT_OF": 2,
-    "HAS_TITLE": 169,
-    "PARENT_OF": 10,
-    "SIBLING_OF": 4,
-    "TITLE_OF": 169
+    "ANCESTOR_OF": 1,
+    "APPOINT": 36,
+    "BORN_IN": 16,
+    "CHILD_OF": 17,
+    "DESCENDANT_OF": 1,
+    "GRANDCHILD_OF": 3,
+    "GRANDPARENT_OF": 3,
+    "HAS_TITLE": 121,
+    "NEPHEW_OR_NIECE_OF": 1,
+    "PARENT_OF": 17,
+    "SIBLING_OF": 10,
+    "TITLE_OF": 121,
+    "UNCLE_OR_AUNT_OF": 1
   },
   "surface_kind_sample_counts": {
-    "source": 784
+    "paraphrase": 15,
+    "source": 697
   },
   "variant_origin_counts": {
-    "context_window": 417
+    "context_window": 340,
+    "existing_variant": 2,
+    "punctuation_variant": 15
   },
   "skipped_groups": {
-    "context_cross_split": 77,
-    "min_length_exceeded": 89,
-    "no_valid_variant": 26,
-    "not_two_fact_group": 395,
-    "semantic_fact_cross_split": 58
+    "context_cross_split": 35,
+    "min_length_exceeded": 9,
+    "no_valid_variant": 2,
+    "not_two_fact_group": 407,
+    "semantic_fact_cross_split": 37
   },
   "validator": {
-    "schema_v2_groups": 196,
-    "lexical_evidence_warnings": 320,
-    "train_samples": 688,
-    "invariance": 392,
-    "contrast": 196,
-    "train_groups": 172,
-    "test_samples": 52,
-    "test_groups": 13,
-    "dev_samples": 44,
-    "dev_groups": 11,
-    "unique_facts": 392,
-    "source_groups": 184,
-    "relation_types": 10,
+    "schema_v2_groups": 178,
+    "lexical_evidence_warnings": 220,
+    "train_samples": 628,
+    "invariance": 356,
+    "contrast": 178,
+    "train_groups": 157,
+    "test_samples": 56,
+    "test_groups": 14,
+    "dev_samples": 28,
+    "dev_groups": 7,
+    "unique_facts": 356,
+    "source_groups": 158,
+    "relation_types": 14,
     "surface_kind_counts": {
-      "source": 784
+      "source": 697,
+      "paraphrase": 15
     },
     "evidence_kind_counts": {
-      "provided_source": 392
+      "provided_source": 356
     }
   },
   "notes": [

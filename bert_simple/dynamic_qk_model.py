@@ -152,6 +152,7 @@ class DynamicQKRelationBank(nn.Module):
         layer_index: int,
         hidden_states: torch.Tensor,
         route_weights: torch.Tensor,
+        active_positions: Optional[Sequence[int]] = None,
     ) -> torch.Tensor:
         """Return routed local attention scores with shape ``[B,H,T,T]``.
 
@@ -218,8 +219,13 @@ class DynamicQKRelationBank(nn.Module):
         scores = scores / math.sqrt(float(self.space_dim))
         if hasattr(self, "structured_scores"):
             scores = scores + self.structured_scores(
-                layer_index, hidden_states, route_weights,
-                self.relation_triples, q_bank, k_bank,
+                layer_index,
+                hidden_states,
+                route_weights,
+                self.relation_triples,
+                q_bank,
+                k_bank,
+                active_positions=active_positions,
             )
         return scores
 
@@ -332,11 +338,13 @@ class DynamicQKRelationBilinearAdapter(ScaledLocalRelationBilinearAdapter):
         layer_index: int,
         hidden_states: torch.Tensor,
         route_weights: torch.Tensor,
+        active_positions: Optional[Sequence[int]] = None,
     ) -> torch.Tensor:
         return self.dynamic_qk.local_scores(
             layer_index,
             hidden_states,
             route_weights,
+            active_positions=active_positions,
         )
 
     def _relation_axis(self, parameter: torch.nn.Parameter) -> Optional[int]:
@@ -448,6 +456,9 @@ class DynamicQKSelfAttention(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         route_weights: Optional[torch.Tensor] = None,
+        active_positions: Optional[Sequence[int]] = None,
+        sparse_gate_mask: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         qkv = self.qkv(hidden_states)
         query, key, value = qkv.chunk(3, dim=-1)
@@ -471,10 +482,13 @@ class DynamicQKSelfAttention(nn.Module):
                 self.layer_index,
                 hidden_states,
                 route_weights,
+                active_positions=active_positions,
             )
             attn_scores = attn_scores + (
                 self.relation_adapter.dynamic_qk_score_scale * local_scores
             )
+        if sparse_gate_mask is not None:
+            attn_scores = attn_scores + sparse_gate_mask
         if attention_mask is not None:
             attn_scores = attn_scores + attention_mask
         attn_probs = torch.softmax(attn_scores, dim=-1)
@@ -509,6 +523,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
         relation_ffn_scale: float = 0.1,
         relation_ffn_chunk_size: int = 32,
         fusion_dim: Optional[int] = None,
+        enable_grammar_sparse_gate: bool = False,
     ):
         relation_triples = list(relation_triples)
         super().__init__(
@@ -553,6 +568,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                 self.relation_ffn_chunk_size,
             )
         self.dynamic_qk_score_scale = float(dynamic_qk_score_scale)
+        self.enable_grammar_sparse_gate = bool(enable_grammar_sparse_gate)
         self._last_route_weights: Optional[torch.Tensor] = None
         for layer_index in range(route_start_layer, config.num_hidden_layers):
             layer = self.bert.encoder.layer[layer_index]
@@ -622,6 +638,57 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
             candidate_mask[..., active] = valid.unsqueeze(-1)
         return candidate_mask
 
+    def _build_sparse_gate(
+        self,
+        input_ids: torch.Tensor,
+    ) -> Tuple[List[int], torch.Tensor]:
+        batch_size, seq_len = input_ids.shape
+        device = input_ids.device
+
+        active_pos_set = set()
+        special_ids = {
+            self.config.pad_token_id,
+            self.config.cls_token_id,
+            self.config.sep_token_id,
+        }
+        if getattr(self, "grammar_attribute_filter", None) is not None:
+            flat_ids = input_ids.view(-1)
+            probs = self.grammar_attribute_filter.word_attributes.probabilities(flat_ids)
+            from .grammar_automaton import ATTRIBUTES
+            punct_idx = ATTRIBUTES.index("PUNCT")
+            func_idx = ATTRIBUTES.index("FUNCTION")
+            is_junk = (probs[:, punct_idx] >= 0.5) | (probs[:, func_idx] >= 0.5)
+            is_junk = is_junk.view(batch_size, seq_len)
+
+            for b in range(batch_size):
+                for idx in range(seq_len):
+                    tid = int(input_ids[b, idx].item())
+                    if tid == self.config.mask_token_id:
+                        active_pos_set.add(idx)
+                    elif tid not in special_ids and not bool(is_junk[b, idx].item()):
+                        active_pos_set.add(idx)
+        else:
+            for idx in range(seq_len):
+                tid = int(input_ids[0, idx].item())
+                if tid not in special_ids:
+                    active_pos_set.add(idx)
+
+        active_positions = sorted(active_pos_set)
+        if not active_positions:
+            active_positions = list(range(seq_len))
+
+        sparse_gate = input_ids.new_full(
+            (batch_size, 1, seq_len, seq_len), -10000.0, dtype=torch.float32
+        )
+        active_pos_tensor = torch.as_tensor(
+            active_positions, dtype=torch.long, device=device
+        )
+        sparse_gate[
+            :, :, active_pos_tensor[:, None], active_pos_tensor[None, :]
+        ] = 0.0
+
+        return active_positions, sparse_gate
+
     def _encode_sequence(
         self,
         input_ids: torch.LongTensor,
@@ -657,6 +724,11 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
 
         route_weights: Optional[torch.Tensor] = None
         all_attentions = () if output_attentions else None
+        active_positions = None
+        sparse_gate_mask = None
+        if getattr(self, "enable_grammar_sparse_gate", False):
+            active_positions, sparse_gate_mask = self._build_sparse_gate(input_ids)
+
         for layer_index, layer_module in enumerate(self.bert.encoder.layer):
             if layer_index == self.route_start_layer:
                 route_weights = self.relation_adapter.route_weights(
@@ -671,6 +743,8 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                 extended_mask,
                 output_attentions=output_attentions,
                 route_weights=layer_route,
+                active_positions=active_positions,
+                sparse_gate_mask=sparse_gate_mask if (layer_index >= self.route_start_layer) else None,
             )
             if output_attentions:
                 all_attentions = all_attentions + (layer_attn,)
@@ -681,6 +755,11 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
 
     def save_pretrained(self, save_directory: str):
         super().save_pretrained(save_directory)
+        if getattr(self, "grammar_attribute_filter", None) is not None:
+            try:
+                self.grammar_attribute_filter.save_pretrained(save_directory)
+            except Exception:
+                pass
         with open(
             os.path.join(save_directory, "dynamic_qk_config.json"),
             "w",
@@ -700,6 +779,7 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
                     "relation_ffn_scale": self.relation_ffn_scale,
                     "relation_ffn_chunk_size": self.relation_ffn_chunk_size,
                     "fusion_dim": self.fusion_dim,
+                    "enable_grammar_sparse_gate": self.enable_grammar_sparse_gate,
                 },
                 handle,
                 ensure_ascii=False,
@@ -744,13 +824,24 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
             with open(dynamic_config_path, "r", encoding="utf-8") as handle:
                 dynamic_config = json.load(handle)
 
+        filter_instance = None
+        if os.path.isfile(
+            os.path.join(load_directory, "grammar_attribute_config.json")
+        ) or os.path.isfile(os.path.join(load_directory, "word_attributes_summary.json")):
+            try:
+                filter_instance = GrammarAttributeFilter.from_pretrained(load_directory)
+            except Exception:
+                filter_instance = GrammarAttributeFilter(tokenizer)
+        else:
+            filter_instance = GrammarAttributeFilter(tokenizer)
+
         model = cls(
             config,
             tokenizer,
             relation_triples=adapter_config["relation_triples"],
             frequency_prior=state_dict["frequency_prior"],
             frequency_class_scales=state_dict["frequency_class_scales"],
-            attribute_filter=GrammarAttributeFilter(tokenizer),
+            attribute_filter=filter_instance,
             attribute_bias_scale=float(
                 prior_config.get("attribute_bias_scale", 1.5)
             ),
@@ -779,12 +870,18 @@ class DynamicQKLocalRelationMarginBertForMaskedLM(
             relation_ffn_scale=float(dynamic_config.get("relation_ffn_scale", 0.1)),
             relation_ffn_chunk_size=int(dynamic_config.get("relation_ffn_chunk_size", 32)),
             fusion_dim=dynamic_config.get("fusion_dim"),
+            enable_grammar_sparse_gate=bool(
+                dynamic_config.get("enable_grammar_sparse_gate", False)
+            ),
         )
         missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
         for key in missing_keys:
-            if not key.startswith("pointer_head."):
+            if not key.startswith("pointer_head.") and not key.startswith(
+                "grammar_attribute_filter."
+            ):
                 raise RuntimeError(f"Missing key in state_dict: {key}")
         if unexpected_keys:
             raise RuntimeError(f"Unexpected keys in state_dict: {unexpected_keys}")
         model.lm_head.weight = model.bert.embeddings.word_embeddings.weight
         return model
+

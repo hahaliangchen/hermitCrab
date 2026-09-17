@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "status": "cleaned_draft_requires_manual_audit",
+  "source_manifest": "data/shiji/manifests/relation_training_v2_draft.jsonl",
+  "input_groups": 178,
+  "unmapped_groups": 0,
+  "excluded_groups": 5,
+  "kept_groups": 173,
+  "global_components": 131,
+  "cross_unit_components": 3,
+  "excluded": [
+    {
+      "group_id": "shiji-rel-v2-line_5469_KINSHIP_16_19",
+      "unit_id": "unit2_warring_states_retainers",
+      "chapter_tag": "田单/屈原/刺客列传",
+      "reason": "国君 is a generic title, not an identified person, in 侠累是韩国国君的叔父."
+    },
+    {
+      "group_id": "shiji-rel-v2-line_5760_appoint_15_17",
+      "unit_id": "unit4_qin_empire_reform",
+      "chapter_tag": "李斯/蒙恬列传",
+      "reason": "拜官吏为老师 is a learning relationship, not an appointment; 人/官吏/老师 are generic roles."
+    },
+    {
+      "group_id": "shiji-rel-v2-line_6472_appoint_5_7",
+      "unit_id": "unit1_chuhan_founding",
+      "chapter_tag": "淮阴侯列传",
+      "reason": "the appointment extractor used 前往 as the actor in 派张良前往立韩信为齐王."
+    },
+    {
+      "group_id": "shiji-rel-v2-line_9307_KINSHIP_2_6",
+      "unit_id": "unit3_han_generals_frontier",
+      "chapter_tag": "司马相如列传",
+      "reason": "王孙 is a truncated parent in 卓王孙的女儿卓文君; the exact parent is not represented."
+    },
+    {
+      "group_id": "shiji-rel-v2-line_9997_appoint_9_14",
+      "unit_id": "unit4_qin_empire_reform",
+      "chapter_tag": "酷吏列传",
+      "reason": "义 is a truncated mention in 义的弟弟义纵; the one-token schema cannot safely recover 义纵."
+    }
+  ],
+  "unmapped": [],
+  "split_targets": {
+    "unit1_chuhan_founding": {
+      "train": 41,
+      "dev": 9,
+      "test": 9
+    },
+    "unit2_warring_states_retainers": {
+      "train": 12,
+      "dev": 3,
+      "test": 3
+    },
+    "unit3_han_generals_frontier": {
+      "train": 24,
+      "dev": 5,
+      "test": 5
+    },
+    "unit4_qin_empire_reform": {
+      "train": 33,
+      "dev": 7,
+      "test": 7
+    },
+    "unit5_spring_autumn_hegemony": {
+      "train": 7,
+      "dev": 2,
+      "test": 2
+    },
+    "unit6_han_society_and_economy": {
+      "train": 2,
+      "dev": 1,
+      "test": 1
+    }
+  },
+  "split_actual": {
+    "unit1_chuhan_founding": {
+      "train": 41,
+      "dev": 9,
+      "test": 9
+    },
+    "unit2_warring_states_retainers": {
+      "train": 12,
+      "dev": 3,
+      "test": 3
+    },
+    "unit3_han_generals_frontier": {
+      "train": 24,
+      "dev": 5,
+      "test": 5
+    },
+    "unit4_qin_empire_reform": {
+      "train": 33,
+      "dev": 7,
+      "test": 7
+    },
+    "unit5_spring_autumn_hegemony": {
+      "train": 7,
+      "dev": 2,
+      "test": 2
+    },
+    "unit6_han_society_and_economy": {
+      "train": 2,
+      "dev": 1,
+      "test": 1
+    }
+  },
+  "global_validation": {
+    "schema_v2_groups": 173,
+    "lexical_evidence_warnings": 220,
+    "test_samples": 108,
+    "invariance": 346,
+    "contrast": 173,
+    "test_groups": 27,
+    "train_samples": 476,
+    "train_groups": 119,
+    "dev_samples": 108,
+    "dev_groups": 27,
+    "unique_facts": 346,
+    "source_groups": 155,
+    "relation_types": 12,
+    "surface_kind_counts": {
+      "source": 677,
+      "paraphrase": 15
+    },
+    "evidence_kind_counts": {
+      "provided_source": 346
+    }
+  },
+  "notes": [
+    "Quality exclusions are high-confidence rejects, not a claim that every remaining heuristic relation is correct.",
+    "Source, fact ID, and semantic-key connected components are assigned globally across all six units.",
+    "Units with fewer than eight groups cannot have a statistically stable independent holdout; their scores should be reported as exploratory.",
+    "Inherited hard negatives still require manual review."
+  ]
+}

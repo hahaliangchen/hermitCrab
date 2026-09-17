@@ -88,14 +88,16 @@ def format_candidate_prefix(sample, shuffle=True, rng=None, order=None):
 
 def build_model(
     tokenizer,
-    hidden_size=64,
-    num_layers=2,
+    hidden_size=256,
+    num_layers=4,
     num_heads=4,
     spaces=8,
     max_length=256,
     relation_ffn_chunk_size=256,
     dynamic_qk_score_scale=1.2,
     fusion_dim=None,
+    enable_grammar_sparse_gate=False,
+    attribute_filter=None,
 ):
     if (
         spaces < 2
@@ -133,11 +135,14 @@ def build_model(
 
     return DynamicQKLocalRelationMarginBertForMaskedLM(
         config, tokenizer, triples, torch.zeros(len(tokenizer)), torch.zeros(len(tokenizer)),
+        attribute_filter=attribute_filter,
         relation_ffn_hidden_size=32, route_dim=16,
         relation_ffn_chunk_size=relation_ffn_chunk_size,
         dynamic_qk_score_scale=dynamic_qk_score_scale,
         fusion_dim=actual_fusion_dim,
+        enable_grammar_sparse_gate=enable_grammar_sparse_gate,
     )
+
 
 
 def visible_inputs(

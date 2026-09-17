@@ -61,19 +61,32 @@ def train(args):
         tokenizer = SimpleBertTokenizer.from_pretrained(str(checkpoint))
         if not model.relation_ffn_hidden_size:
             raise ValueError("checkpoint has no relation FFN")
+        if hasattr(args, "enable_grammar_sparse_gate"):
+            model.enable_grammar_sparse_gate = bool(args.enable_grammar_sparse_gate)
     else:
         tokenizer = training_tokenizer(groups, all_splits=(args.vocab_scope == "all_splits"))
+        attribute_filter = None
+        filter_path = getattr(args, "grammar_filter_path", "outputs/shiji-grammar-attribute-filter")
+        if filter_path and Path(filter_path).exists():
+            from bert_simple.grammar_attribute_filter import GrammarAttributeFilter
+            try:
+                attribute_filter = GrammarAttributeFilter.from_pretrained(filter_path)
+            except Exception as e:
+                print(f"[Warning] Could not load grammar attribute filter from {filter_path}: {e}")
         model = build_model(
             tokenizer,
             args.hidden_size,
-            2,
-            4,
+            args.num_layers,
+            args.num_heads,
             args.spaces,
             args.max_length,
             relation_ffn_chunk_size=args.relation_ffn_chunk_size,
             dynamic_qk_score_scale=args.dynamic_qk_score_scale,
             fusion_dim=getattr(args, "fusion_dim", None),
+            enable_grammar_sparse_gate=getattr(args, "enable_grammar_sparse_gate", True),
+            attribute_filter=attribute_filter,
         )
+
     device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device)
     if args.max_length > int(model.config.max_position_embeddings):
@@ -241,7 +254,9 @@ def parser():
     result.add_argument("--output-dir", required=True)
     result.add_argument("--init-checkpoint", help="warm start a NEW pair-training checkpoint; optimizer restarts")
     result.add_argument("--epochs", type=int, default=25)
-    result.add_argument("--hidden-size", type=int, default=64)
+    result.add_argument("--hidden-size", type=int, default=256)
+    result.add_argument("--num-layers", type=int, default=4)
+    result.add_argument("--num-heads", type=int, default=4)
     result.add_argument("--spaces", type=int, default=8)
     result.add_argument("--learning-rate", type=float, default=3e-4)
     result.add_argument("--margin", type=float, default=3.5)
@@ -267,7 +282,11 @@ def parser():
     result.add_argument("--vocab-scope", choices=["train_only", "all_splits"], default="all_splits")
     result.add_argument("--relation-ffn-chunk-size", type=int, default=256)
     result.add_argument("--device", default=None, help="Device to use ('cuda' or 'cpu'). Defaults to cuda if available.")
+    result.add_argument("--enable-grammar-sparse-gate", action="store_true", default=True, help="Enable System 1 vs System 2 grammar sparse mask gating")
+    result.add_argument("--no-grammar-sparse-gate", dest="enable_grammar_sparse_gate", action="store_false")
+    result.add_argument("--grammar-filter-path", type=str, default="outputs/shiji-grammar-attribute-filter", help="Path to trained grammar attribute filter checkpoint")
     return result
+
 
 
 if __name__ == "__main__":

@@ -437,25 +437,79 @@ class StructuredRelationScores(nn.Module):
             result = result + (local * route_weight.unsqueeze(1)).sum(dim=-1)
         return result * self.scale
 
-    def forward(self, layer_index, hidden, routes, triples, q_bank, k_bank):
+    def forward(
+        self,
+        layer_index,
+        hidden,
+        routes,
+        triples,
+        q_bank,
+        k_bank,
+        active_positions=None,
+    ):
         batch, length, _ = hidden.shape
         result = hidden.new_zeros(batch, q_bank.shape[0], length, length)
         active = self._active_spaces(routes, len(triples))
-        for space in active.tolist():
-            if space >= len(triples):
-                continue
-            selected = hidden[..., list(triples[space])]
-            q = self._project(selected, q_bank[:, space])
-            k = self._project(selected, k_bank[:, space])
-            weights = routes[..., space]
-            scores = self.ffn.forward_pairwise(
-                q,
-                k,
-                query_chunk_size=self.chunk_size,
-                key_chunk_size=self.chunk_size,
+        if active.numel() == 0:
+            return result
+
+        if active_positions is not None:
+            active_pos = torch.as_tensor(
+                list(active_positions), dtype=torch.long, device=hidden.device
             )
-            pair_weights = torch.matmul(
-                weights.unsqueeze(-1), weights.unsqueeze(-2)
-            ).unsqueeze(1)
-            result = result + scores * pair_weights
-        return result * self.scale
+            active_pos = active_pos[(active_pos >= 0) & (active_pos < length)]
+            if active_pos.numel() == 0:
+                return result
+
+            # Sparse FFN: evaluate 18D features only on candidate entity/slot positions
+            q_selected_tokens = hidden.index_select(1, active_pos)
+            k_selected_tokens = hidden.index_select(1, active_pos)
+            q_routes = routes.index_select(1, active_pos)
+            k_routes = routes.index_select(1, active_pos)
+            k_len = active_pos.numel()
+
+            sub_accum = hidden.new_zeros(batch, q_bank.shape[0], k_len, k_len)
+            for space in active.tolist():
+                if space >= len(triples):
+                    continue
+                dims = list(triples[space])
+                q = self._project(q_selected_tokens[..., dims], q_bank[:, space])
+                k = self._project(k_selected_tokens[..., dims], k_bank[:, space])
+                weights_q = q_routes[..., space]
+                weights_k = k_routes[..., space]
+                scores = self.ffn.forward_pairwise(
+                    q,
+                    k,
+                    query_chunk_size=self.chunk_size,
+                    key_chunk_size=self.chunk_size,
+                )
+                pair_weights = torch.matmul(
+                    weights_q.unsqueeze(-1), weights_k.unsqueeze(-2)
+                ).unsqueeze(1)
+                sub_accum = sub_accum + scores * pair_weights
+
+            sub_scaled = sub_accum * self.scale
+            result = result.index_put(
+                (slice(None), slice(None), active_pos[:, None], active_pos[None, :]),
+                sub_scaled,
+            )
+            return result
+        else:
+            for space in active.tolist():
+                if space >= len(triples):
+                    continue
+                selected = hidden[..., list(triples[space])]
+                q = self._project(selected, q_bank[:, space])
+                k = self._project(selected, k_bank[:, space])
+                weights = routes[..., space]
+                scores = self.ffn.forward_pairwise(
+                    q,
+                    k,
+                    query_chunk_size=self.chunk_size,
+                    key_chunk_size=self.chunk_size,
+                )
+                pair_weights = torch.matmul(
+                    weights.unsqueeze(-1), weights.unsqueeze(-2)
+                ).unsqueeze(1)
+                result = result + scores * pair_weights
+            return result * self.scale

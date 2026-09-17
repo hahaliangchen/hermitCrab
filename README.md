@@ -1,5 +1,13 @@
 # BERT Simple（三维关系与动态 Q/K 实验版）
 
+### 核心架构思想与设计哲学（必读）
+📖 **[认知双系统与稀疏流形门控：HermitCrab 设计思想与对话精粹](DESIGN_PHILOSOPHY_AND_COGNITIVE_ARCHITECTURE.md)**  
+详细阐述了 System 1 语感习惯与 System 2 18 维流形推理的认知解耦、全注意力的“勤奋假象”、过拟合本源与内嵌式 If-Else 稀疏门控机制。
+
+📐 **[前置 3D 关系流形与因果电路架构设计规范](PRE_FFN_3D_MANIFOLD_AND_CAUSAL_CIRCUIT_DESIGN.md)**  
+详细定义了前置 3D 审查 FFN、合向量去成分、3 维捆绑归零、GELU 晶体管电路门控、反向拔插头测试与 ReLU 平方纯净稀疏注意力机制。
+
+
 ### 18 维关系 FFN 与纠错回退（实验功能）
 
 数据生成规范见 [RELATION_TRAINING_DATA_SPEC.md](RELATION_TRAINING_DATA_SPEC.md)，
